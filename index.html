@@ -1,260 +1,314 @@
-/***** GRANTOP_Financas V2.3 — Code.gs (JSONP WebApp focado em Créditos)
- * Compatível com o index.html V2.3 enviado.
- * Endpoints usados pelo front:
- *  - GET ?action=ping
- *  - GET ?action=config
- *  - GET ?action=setmonth&mes=YYYY-MM
- *  - GET ?action=listreg
- *  - GET ?action=savereg&payload=JSON
- *  - GET ?action=delreg&id=ROWINDEX
- *  - GET ?action=resumo
- * Sempre com: token=PUBLIC_TOKEN e callback=<função JSONP>
- *****/
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>GRANTOP • Finanças V2.3</title>
+  <link rel="icon" type="image/png" href="logo.png"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body{background:#0b1220;color:#e2e8f0}
+    .card{background:#0f172a;border:1px solid #334155;border-radius:14px;padding:14px}
+    .pill{border:1px solid #334155;border-radius:9999px;padding:.4rem .75rem;background:#0b1220}
+    .btn{border:1px solid #334155;border-radius:.6rem;padding:.5rem .9rem;background:#0e1627}
+    .btn:hover{background:#14213b}
+    .input{background:#0a0f1a;border:1px solid #334155;border-radius:.5rem;padding:.55rem .7rem;outline:none}
+    table{border-collapse:collapse;width:100%}
+    th,td{border-bottom:1px solid #1f2937;padding:.55rem;font-size:.92rem}
+    .badge{display:inline-block;padding:.2rem .55rem;border-radius:9999px;border:1px solid transparent;font-size:.75rem}
+    .b-green{background:#065f46;color:#d1fae5;border-color:#10b981;cursor:pointer}
+    .b-red{background:#7f1d1d;color:#fecaca;border-color:#ef4444;cursor:pointer}
+    /* PIN overlay */
+    #pinGate{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0b1220;z-index:9999}
+    #pinCard{width:min(92%,380px);background:#0f172a;border:1px solid #334155;border-radius:14px;padding:18px;text-align:center}
+    #pinCard input{width:100%;padding:10px;border-radius:8px;background:#0a0f1a;border:1px solid #334155;color:#e2e8f0}
+    #pinErr{color:#fecaca;min-height:18px;margin-top:6px;font-size:.85rem}
+  </style>
 
-// ===== CONFIG BÁSICA =====
-const PUBLIC_TOKEN   = '2400';               // mesmo token do index.html
-const PROP_MES_ATUAL = 'MES_ATUAL_ISO';      // yyyy-mm-01 (guardado em DocumentProperties)
+  <script>
+    /* ====== CONFIG ====== */
+    // Troque se reimplantar o Web App:
+    const API_URL = 'https://script.google.com/macros/s/AKfycbyK02FLumiQoyMjVDvArN99hihh4fQ0M8husKp-aO6Pc-KSDfgI5T1dy4g8Vpqxw5YCUA/exec';
+    const TOKEN   = '2400';     // mesmo do Code.gs (PUBLIC_TOKEN)
+    const UI_PIN  = '2400';     // apenas para o portão de acesso no HTML
 
-// ===== NOMES DE ABAS / CABEÇALHO =====
-const ABA_FAT_BASE = 'Faturamento';          // base / fallback
-const ABA_RESUMO   = 'Resumo Mensal';
+    /* ====== Utils ====== */
+    const moneyBR  = v => Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2});
+    const toNumber = v => v? Number(String(v).replace(/\./g,'').replace(',','.'))||0 : 0;
+    const fmtDate  = v => { if(!v) return ''; const s=String(v).split('T')[0]; return /^\d{4}-\d{2}-\d{2}$/.test(s)? s : s; };
 
-const HEAD_FAT = [
-  'Data', 'Cliente', 'Serviço',
-  'Preço (opcional)', 'Valor',
-  'NF? (Sim/Não)', 'NF (opcional)',
-  'Boleto/Recibo', 'Vencimento',
-  'Pago? (Sim/Não)', 'Observações'
-];
-
-// ===== Helpers Gerais =====
-function outputJSONP_(cb, obj){
-  const json = JSON.stringify(obj);
-  if (cb) return ContentService.createTextOutput(`${cb}(${json})`).setMimeType(ContentService.MimeType.JAVASCRIPT);
-  return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
-}
-function getProps_(){ return PropertiesService.getDocumentProperties(); }
-
-function toMonthStartIso_(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`; }
-function normalizeMonthInputToIso_(input){
-  const s=String(input||'').trim();
-  if(/^\d{4}-\d{2}$/.test(s)) return s+'-01';
-  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const m=s.match(/^(\d{2})[\/\-\.](\d{4})$/);
-  if(m){ const mm=Number(m[1]); if(mm>=1 && mm<=12) return `${m[2]}-${m[1]}-01`; }
-  throw new Error('Mês inválido. Use YYYY-MM ou MM/AAAA.');
-}
-function getMesAtualIso_(){
-  const p=getProps_();
-  return p.getProperty(PROP_MES_ATUAL) || toMonthStartIso_(new Date());
-}
-function isoToYYYYMM_(iso){ return String(iso||'').slice(0,7); }
-function isoToLabel_(iso){
-  const [y,m]=String(iso||'').split('-');
-  const nomes=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  return `${nomes[Number(m)-1]}/${y}`;
-}
-
-function toNumber_(v){
-  if(v==='' || v==null) return 0;
-  if(typeof v==='number') return v;
-  const n = Number(String(v).replace(/\./g,'').replace(',','.'));
-  return isNaN(n)?0:n;
-}
-function toDateFromHtml_(ymd){
-  if(!ymd) return '';
-  const m=String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if(!m) throw new Error('Data inválida: '+ymd);
-  const d=new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
-  if(isNaN(d.getTime())) throw new Error('Data inválida: '+ymd);
-  return d;
-}
-function toYMD_(d){
-  if(!(d instanceof Date)) return '';
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-}
-
-// ===== Sheets Helpers =====
-function ss_(){ return SpreadsheetApp.getActive(); }
-function ensureSheet_(name){
-  const ss=ss_();
-  return ss.getSheetByName(name) || ss.insertSheet(name);
-}
-function ensureHeader_(sh, header){
-  const got=sh.getRange(1,1,1,header.length).getValues()[0];
-  const empty = got.every(c=>String(c)==='');
-  if(empty){ sh.getRange(1,1,1,header.length).setValues([header]); sh.setFrozenRows(1); }
-  return sh;
-}
-
-// Retorna a aba de faturamento para o YYYY-MM da propriedade MES_ATUAL
-function getFatSheetForCurrentMonth_(){
-  const iso = getMesAtualIso_();
-  const yyyymm = isoToYYYYMM_(iso);
-  const ss = ss_();
-  const tabName = `${ABA_FAT_BASE} ${yyyymm}`;          // ex.: "Faturamento 2025-09"
-  let sh = ss.getSheetByName(tabName);
-  if(!sh){
-    // tenta fallback "Faturamento"
-    sh = ss.getSheetByName(ABA_FAT_BASE);
-    if(!sh){
-      // cria a com mês
-      sh = ss.insertSheet(tabName);
-    }else{
-      // se existe a base e NÃO existe a do mês, é melhor criar a do mês
-      sh = ss.insertSheet(tabName);
-    }
-  }
-  return ensureHeader_(sh, HEAD_FAT);
-}
-
-// ====== API: CONFIG / MÊS ======
-function api_config(){
-  const iso = getMesAtualIso_();
-  return {
-    mesAtualIso: iso,
-    mesAtualYYYYMM: isoToYYYYMM_(iso),
-    mesAtualLabel: isoToLabel_(iso),
-    spreadsheetId: ss_().getId(),
-    tz: Session.getScriptTimeZone()
-  };
-}
-function api_setmonth(mesInput){
-  const iso = normalizeMonthInputToIso_(mesInput);
-  getProps_().setProperty(PROP_MES_ATUAL, iso);
-  // garante a aba do mês
-  const sh = getFatSheetForCurrentMonth_();
-  sh.autoResizeColumns(1, HEAD_FAT.length);
-  return { ok:true, mesAtualIso: iso, mesAtualYYYYMM: isoToYYYYMM_(iso), mesAtualLabel: isoToLabel_(iso) };
-}
-
-// ====== API: CRÉDITOS (Faturamento) ======
-
-// Lista os registros da aba do mês atual
-function api_listreg(){
-  const sh = getFatSheetForCurrentMonth_();
-  const last=sh.getLastRow();
-  const out=[];
-  if(last>=2){
-    const vals = sh.getRange(2,1,last-1, Math.max(HEAD_FAT.length, 11)).getValues();
-    for(let i=0;i<vals.length;i++){
-      const r=vals[i]; if(!r || (r.every(c=>String(c)===''))) continue;
-      const rowIndex = 2+i;
-      const nfNum   = String(r[6]||'').trim();
-      const boleto  = String(r[7]||'').trim();
-      const venc    = r[8] instanceof Date ? toYMD_(r[8]) : String(r[8]||'').trim();
-      const obsLivre= String(r[10]||'').trim();
-      const extra=[]; if(nfNum) extra.push('NF:'+nfNum); if(boleto) extra.push('boleto:'+boleto); if(venc) extra.push('venc:'+venc); if(obsLivre) extra.push(obsLivre);
-
-      out.push({
-        _rowId: rowIndex,
-        data: (r[0] instanceof Date) ? toYMD_(r[0]) : String(r[0]||''),
-        cliente: String(r[1]||''),
-        servico: String(r[2]||''),
-        valor: Number(r[4])||0,
-        pago: String(r[9]||''),
-        obs: extra.join(' | ')
+    // JSONP helper (sem CORS)
+    function jsonp(url, timeout=15000){
+      return new Promise((resolve,reject)=>{
+        const cb='cb_'+Math.random().toString(36).slice(2);
+        const s=document.createElement('script');
+        const done=()=>{ try{s.remove();}catch(e){} delete window[cb]; };
+        const t=setTimeout(()=>{ done(); reject(new Error('timeout')); }, timeout);
+        window[cb]=data=>{ clearTimeout(t); done(); resolve(data); };
+        s.src = url + (url.includes('?')?'&':'?') + 'token=' + encodeURIComponent(TOKEN) + '&callback=' + cb + '&_=' + Date.now();
+        s.onerror=()=>{ clearTimeout(t); done(); reject(new Error('network')); };
+        document.body.appendChild(s);
       });
     }
-  }
-  return out;
-}
 
-/**
- * Salva registro de crédito
- * payload: { id?:rowIndex, data(yyyy-mm-dd), cliente, servico, valor, pago('Sim'|'Não'), obs('NF:... | boleto:... | venc:yyyy-mm-dd | ...') }
- */
-function api_savereg(payload){
-  const sh = getFatSheetForCurrentMonth_();
-  const dt = payload.data ? toDateFromHtml_(payload.data) : '';
-  const val= toNumber_(payload.valor);
-  const obsStr = String(payload.obs||'');
-  const mNF=obsStr.match(/NF:([^|]+)/i), mL=obsStr.match(/boleto:([^|]+)/i), mV=obsStr.match(/venc:([\d-]+)/i);
-  const obsLivre = obsStr.replace(/(?:NF:[^|]+|boleto:[^|]+|venc:[^|]+)\s*\|?\s*/gi,'').trim();
+    // API client
+    const api={
+      ping:    ()=>jsonp(API_URL+'?action=ping'),
+      config:  ()=>jsonp(API_URL+'?action=config'),
+      setMonth:(yyyymm)=>jsonp(API_URL+'?action=setmonth&mes='+encodeURIComponent(yyyymm)),
+      listReg: ()=>jsonp(API_URL+'?action=listreg'),
+      saveReg: (payload)=>jsonp(API_URL+'?action=savereg&payload='+encodeURIComponent(JSON.stringify(payload))),
+      delReg:  (row)=>jsonp(API_URL+'?action=delreg&id='+encodeURIComponent(row)),
+      resumo:  ()=>jsonp(API_URL+'?action=resumo')
+    };
 
-  const linha = [
-    dt, payload.cliente||'', payload.servico||'',
-    '', val,
-    payload.pago==='Sim' ? 'Sim' : 'Não',
-    mNF?mNF[1].trim():'', mL?mL[1].trim():'',
-    mV?toDateFromHtml_(mV[1].trim()):'',
-    payload.pago==='Sim' ? 'Sim' : 'Não',
-    obsLivre
-  ];
+    // Estado
+    let cacheCreditos=[];  // rows do mês atual
 
-  if(payload.id){
-    const row=Number(payload.id);
-    if(row<=1 || row>sh.getLastRow()) throw new Error('Linha inválida.');
-    sh.getRange(row,1,1,linha.length).setValues([linha]);
-    // formatos
-    sh.getRange(row,1).setNumberFormat('dd/mm/yyyy');
-    sh.getRange(row,9).setNumberFormat('dd/mm/yyyy');
-    sh.getRange(row,5).setNumberFormat('R$ #,##0.00');
-    return {ok:true, id:row};
-  }else{
-    sh.appendRow(linha);
-    const lr=sh.getLastRow();
-    sh.getRange(lr,1).setNumberFormat('dd/mm/yyyy');
-    sh.getRange(lr,9).setNumberFormat('dd/mm/yyyy');
-    sh.getRange(lr,5).setNumberFormat('R$ #,##0.00');
-    return {ok:true, id:lr};
-  }
-}
-
-function api_delreg(rowIndex){
-  const sh = getFatSheetForCurrentMonth_();
-  const r=Number(rowIndex);
-  if(r<=1 || r>sh.getLastRow()) throw new Error('Linha inválida.');
-  sh.deleteRow(r);
-  return {ok:true};
-}
-
-// ====== API: RESUMO (stub simples) ======
-function api_resumo(){
-  const sh = ensureSheet_(ABA_RESUMO);
-  const iso=getMesAtualIso_(), label=isoToLabel_(iso);
-  sh.clear();
-  sh.getRange(1,1).setValue('Resumo — '+label).setFontWeight('bold').setFontSize(14);
-  sh.setFrozenRows(1);
-  return {ok:true};
-}
-
-// ====== WEB (JSONP) ======
-function doGet(e){
-  try{
-    const p = e && e.parameter ? e.parameter : {};
-    const cb = p.callback || null;
-
-    if (!p.token || p.token !== PUBLIC_TOKEN){
-      return outputJSONP_(cb, {ok:false, error:'Unauthorized'});
-    }
-
-    const a = String(p.action||'').toLowerCase();
-    let result;
-
-    switch(a){
-      case 'ping':    result={ok:true,time:new Date()}; break;
-      case 'config':  result=api_config(); break;
-      case 'setmonth':{
-        const mes = p.mes || p.month || p.m;
-        result = api_setmonth(mes);
-        break;
+    /* ====== Render ====== */
+    function renderTabelaCreditos(rows){
+      cacheCreditos=rows.slice();
+      const tb=document.getElementById('tbodyCred');
+      tb.innerHTML='';
+      if(rows.length===0){
+        tb.innerHTML='<tr><td colspan="9" class="text-slate-400 text-center">Sem lançamentos neste mês.</td></tr>';
+        recalcKPIs();
+        return;
       }
-
-      // Créditos (Faturamento)
-      case 'listreg': result = api_listreg(); break;
-      case 'savereg': result = api_savereg( JSON.parse(p.payload||'{}') ); break;
-      case 'delreg':  result = api_delreg(p.id); break;
-
-      case 'resumo':  result = api_resumo(); break;
-
-      default:
-        throw new Error('Ação inválida');
+      rows.forEach(r=>{
+        const pagoBtn = (String(r.pago).toLowerCase()==='sim')
+          ? `<span class="badge b-green js-toggle" data-id="${r._rowId}" data-pago="Sim">Sim</span>`
+          : `<span class="badge b-red js-toggle" data-id="${r._rowId}" data-pago="Não">Não</span>`;
+        const tr=document.createElement('tr');
+        tr.innerHTML = `
+          <td>${fmtDate(r.data)}</td>
+          <td>${r.cliente||''}</td>
+          <td>${r.servico||''}</td>
+          <td class="text-right">R$ ${moneyBR(r.valor)}</td>
+          <td>${pagoBtn}</td>
+          <td>${r.obs||''}</td>
+          <td class="text-right">
+            <button class="btn text-xs js-edit" data-id="${r._rowId}">Editar</button>
+            <button class="btn text-xs js-del"  data-id="${r._rowId}">Excluir</button>
+          </td>`;
+        tb.appendChild(tr);
+      });
+      recalcKPIs();
     }
 
-    return outputJSONP_(cb, {ok:true, result});
-  }catch(err){
-    const cb = e && e.parameter ? e.parameter.callback : null;
-    return outputJSONP_(cb, {ok:false, error:String(err)});
-  }
-}
+    function recalcKPIs(){
+      const credTot = cacheCreditos.reduce((s,x)=>s+Number(x.valor||0),0);
+      const folhaTot= 0; // nesta V2.3 focada em créditos não calculamos folha
+      const fixPend = 0; // idem
+      const saldoPrev = credTot - (folhaTot + fixPend);
+      document.getElementById('kCredTot').textContent = 'R$ '+moneyBR(credTot);
+      document.getElementById('kFolhaTot').textContent = 'R$ '+moneyBR(folhaTot);
+      document.getElementById('kFixPend').textContent  = 'R$ '+moneyBR(fixPend);
+      document.getElementById('kSaldoPrev').textContent= 'R$ '+moneyBR(saldoPrev);
+    }
+
+    /* ====== Eventos UI ====== */
+    // Salvar crédito
+    async function onSalvarCredito(e){
+      e.preventDefault();
+      const p={
+        id: crId.value || undefined,
+        data: crData.value,
+        cliente: crCliente.value.trim(),
+        servico: crServico.value.trim(),
+        valor: toNumber(crValor.value),
+        pago:  crPago.value,
+        obs:   buildObs(crNF.value, crBoleto.value, crVenc.value, crObs.value)
+      };
+      try{
+        const r = await api.saveReg(p);
+        if(!r || !r.ok){ alert('Falha ao salvar crédito.'); return; }
+        formCred.reset(); crId.value='';
+        await loadEverything(); // recarrega tabela
+      }catch(err){ alert('Falha ao salvar crédito.'); }
+    }
+
+    function buildObs(nf,link,venc,livre){
+      const p=[]; if(nf) p.push('NF:'+nf); if(link) p.push('boleto:'+link); if(venc) p.push('venc:'+venc); if(livre) p.push(livre);
+      return p.join(' | ');
+    }
+
+    // Clicks na tabela (editar / excluir / toggle pago)
+    document.addEventListener('click', async (ev)=>{
+      const t=ev.target;
+      // Toggle pago com 1 clique
+      if(t.classList.contains('js-toggle')){
+        const id = Number(t.dataset.id);
+        const row = cacheCreditos.find(x=>Number(x._rowId)===id);
+        if(!row) return;
+        const novoPago = (String(row.pago).toLowerCase()==='sim') ? 'Não' : 'Sim';
+        const payload = {
+          id: id,
+          data: row.data || '', cliente: row.cliente||'', servico: row.servico||'',
+          valor: row.valor||0, pago: novoPago, obs: row.obs||''
+        };
+        try{
+          const r=await api.saveReg(payload);
+          if(!r || !r.ok){ alert('Falha ao atualizar pago.'); return; }
+          await loadEverything();
+        }catch(err){ alert('Falha ao atualizar pago.'); }
+      }
+      // Editar
+      if(t.classList.contains('js-edit')){
+        const id=Number(t.dataset.id);
+        const it=cacheCreditos.find(x=>Number(x._rowId)===id);
+        if(!it) return;
+        crId.value=id;
+        crData.value= /^\d{4}-\d{2}-\d{2}$/.test(it.data)?it.data:'';
+        crCliente.value=it.cliente||'';
+        crServico.value=it.servico||'';
+        crValor.value=String(it.valor).replace('.',',');
+        crPago.value = (String(it.pago).toLowerCase()==='sim')?'Sim':'Não';
+        // não vamos tentar remontar NF/Boleto/Venc do campo obs — o usuário pode reescrever
+        crNF.value=''; crBoleto.value=''; crVenc.value=''; crObs.value=it.obs||'';
+        window.scrollTo({top:0, behavior:'smooth'});
+      }
+      // Excluir
+      if(t.classList.contains('js-del')){
+        const id=Number(t.dataset.id);
+        if(!confirm('Excluir esse lançamento?')) return;
+        try{
+          const r=await api.delReg(id);
+          if(!r || !r.ok){ alert('Falha ao excluir.'); return; }
+          await loadEverything();
+        }catch(err){ alert('Falha ao excluir.'); }
+      }
+    });
+
+    // Mês vigente
+    btnAplicarMes.addEventListener('click', async ()=>{
+      const m = mesVigente.value; // yyyy-mm
+      if(!/^\d{4}-\d{2}$/.test(m)){ alert('Selecione um mês válido.'); return; }
+      try{
+        const r=await api.setMonth(m);
+        if(!r || !r.ok){ alert('Falha ao aplicar mês.'); return; }
+        await loadEverything();
+      }catch(err){ alert('Falha ao aplicar mês.'); }
+    });
+
+    // Resumo (planilha)
+    btnResumo.addEventListener('click', async ()=>{
+      try{
+        const r=await api.resumo();
+        if(!r || !r.ok){ alert('Falha ao gerar resumo.'); return; }
+        alert('Resumo atualizado na planilha.');
+      }catch(err){ alert('Falha ao gerar resumo.'); }
+    });
+
+    /* ====== Carregar tudo ====== */
+    async function loadEverything(){
+      try{
+        const [cfg, regs] = await Promise.all([ api.config(), api.listReg() ]);
+        const info = cfg?.result || cfg; // tolerância
+        if(info?.mesAtualYYYYMM) mesVigente.value = info.mesAtualYYYYMM;
+        renderTabelaCreditos((regs?.result)||regs||[]);
+      }catch(err){
+        console.error(err);
+        alert('Falha ao conectar.');
+      }
+    }
+
+    /* ====== PIN gate ====== */
+    function pinInit(){
+      const gate=document.getElementById('pinGate');
+      const input=document.getElementById('pinInput');
+      const btn=document.getElementById('pinBtn');
+      const err=document.getElementById('pinErr');
+      function open(){ gate.style.display='none'; loadEverything(); }
+      function show(){ gate.style.display='flex'; input.focus(); }
+      function tryOpen(){
+        if(String(input.value||'')===String(UI_PIN)){ localStorage.setItem('grantop_pin_ok','1'); open(); }
+        else{ err.textContent='PIN incorreto'; input.select(); }
+      }
+      if(localStorage.getItem('grantop_pin_ok')==='1'){ open(); }
+      else{ show(); }
+      btn.addEventListener('click', tryOpen);
+      input.addEventListener('keydown', e=>{ if(e.key==='Enter') tryOpen(); });
+      btnLogout.addEventListener('click', ()=>{ localStorage.removeItem('grantop_pin_ok'); location.reload(); });
+    }
+
+    document.addEventListener('DOMContentLoaded', ()=>{
+      pinInit();
+      formCred.addEventListener('submit', onSalvarCredito);
+    });
+  </script>
+</head>
+<body>
+  <!-- PIN overlay -->
+  <div id="pinGate">
+    <div id="pinCard">
+      <img src="logo.png" alt="GRANTOP" style="height:40px;opacity:.9;margin:0 auto 10px;display:block">
+      <div class="text-lg font-semibold mb-1">Acesso restrito</div>
+      <div class="text-sm opacity-80 mb-3">Informe o PIN para entrar.</div>
+      <input id="pinInput" type="password" placeholder="PIN">
+      <div id="pinErr"></div>
+      <button id="pinBtn" class="btn w-full mt-2">Entrar</button>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header class="p-4 md:p-6 bg-slate-900 shadow flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <img src="logo.png" alt="GRANTOP" class="h-9 w-auto"/>
+      <div class="leading-tight">
+        <h1 class="text-xl font-bold">GRANTOP</h1>
+        <div class="text-sky-300">• Finanças</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2">
+        <label class="text-sm opacity-80">Mês vigente</label>
+        <input id="mesVigente" type="month" class="input">
+        <button id="btnAplicarMes" class="pill">Aplicar</button>
+      </div>
+      <button id="btnResumo" class="pill">Gerar Resumo (planilha)</button>
+      <button id="btnLogout" class="pill">Sair (PIN)</button>
+    </div>
+  </header>
+
+  <!-- KPIs -->
+  <section class="grid md:grid-cols-4 gap-3 p-4">
+    <div class="card"><div class="text-sm text-slate-400">Créditos (Total)</div><div id="kCredTot" class="text-xl font-semibold">R$ 0,00</div></div>
+    <div class="card"><div class="text-sm text-slate-400">Folha (Total)</div><div id="kFolhaTot" class="text-xl font-semibold">R$ 0,00</div></div>
+    <div class="card"><div class="text-sm text-slate-400">Fixas Pendentes</div><div id="kFixPend" class="text-xl font-semibold">R$ 0,00</div></div>
+    <div class="card"><div class="text-sm text-slate-400">Saldo Previsto</div><div id="kSaldoPrev" class="text-xl font-semibold">R$ 0,00</div></div>
+  </section>
+
+  <!-- Créditos -->
+  <main class="max-w-6xl mx-auto p-4">
+    <section class="card">
+      <h2 class="text-lg font-semibold mb-3">Créditos (Faturamento)</h2>
+
+      <form id="formCred" class="grid md:grid-cols-6 gap-3 items-end">
+        <input type="hidden" id="crId"/>
+        <div><label class="text-sm text-slate-400">Data</label><input id="crData" class="input" type="date" required></div>
+        <div class="md:col-span-2"><label class="text-sm text-slate-400">Cliente</label><input id="crCliente" class="input" required></div>
+        <div class="md:col-span-3"><label class="text-sm text-slate-400">Serviço / Local executado</label><input id="crServico" class="input" required></div>
+        <div><label class="text-sm text-slate-400">Valor (R$)</label><input id="crValor" class="input" inputmode="decimal" required></div>
+        <div><label class="text-sm text-slate-400">Pago?</label><select id="crPago" class="input"><option>Não</option><option>Sim</option></select></div>
+        <div><label class="text-sm text-slate-400">NF (opcional)</label><input id="crNF" class="input"></div>
+        <div class="md:col-span-2"><label class="text-sm text-slate-400">Link do boleto (opcional)</label><input id="crBoleto" class="input" placeholder="https://..."></div>
+        <div><label class="text-sm text-slate-400">Venc. do boleto</label><input id="crVenc" class="input" type="date"></div>
+        <div class="md:col-span-2"><label class="text-sm text-slate-400">Observações</label><input id="crObs" class="input"></div>
+        <div class="md:col-span-6"><button class="btn" type="submit">Salvar</button></div>
+      </form>
+
+      <div class="overflow-auto mt-6">
+        <table>
+          <thead class="text-slate-400">
+          <tr>
+            <th>Data</th><th>Cliente</th><th>Serviço</th><th class="text-right">Valor</th><th>Pago?</th><th>Obs</th><th class="text-right">Ações</th>
+          </tr>
+          </thead>
+          <tbody id="tbodyCred"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
