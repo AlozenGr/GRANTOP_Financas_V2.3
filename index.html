@@ -359,7 +359,7 @@
       resumo:   ()=>jsonp(API_URL+'?action=resumo')
     };
 
-    // ====== Carregamento / Conexão (definido ANTES do PIN) ======
+    // ====== Conexão / cache (antes do PIN)
     const connEl = document.getElementById('conn');
     const setConn = (t,cls)=>{ connEl.textContent=t; connEl.className='text-xs '+(cls||'text-slate-300'); };
 
@@ -377,6 +377,7 @@
       return api.setMonth(yyyymm).then(()=>{});
     }
 
+    // carregadores
     function loadFuncionarios(){ api.listFunc().then(r=>{ if(!r||!r.ok){showError('Listar funcionários falhou.');return;} hideError(); renderFuncionarios(r.result||[]); }).catch(e=>showError(e.message)); }
     function loadCreditos(){ api.listCred().then(r=>{ if(!r||!r.ok){showError('Listar créditos falhou.');return;} hideError(); renderCreditos(r.result||[]); }).catch(e=>showError(e.message)); }
     function loadFixas(){ api.listFix().then(r=>{ if(!r||!r.ok){showError('Listar fixas falhou.');return;} hideError(); renderFixas(r.result||[]); }).catch(e=>showError(e.message)); }
@@ -416,8 +417,7 @@
     }));
 
     // ===== MÊS VIGENTE
-    document.getElementById('btnMesSalvar').addEventListener('click', ()=>{
-      const v = mesInput.value;
+    function applyMonth(v){
       if(!/^\d{4}-\d{2}$/.test(v)){ alert('Selecione um mês válido.'); return; }
       api.setMonth(v).then(r=>{
         if(!r||!r.ok){ alert('Falha ao definir mês.'); return; }
@@ -425,7 +425,10 @@
         document.getElementById('sumMsg').textContent = 'Resumo atualizado para '+ (info.mesAtualLabel || '');
         connectAndLoad();
       }).catch(ex=>showError(ex.message));
-    });
+    }
+    document.getElementById('btnMesSalvar').addEventListener('click', ()=>applyMonth(mesInput.value));
+    // automático ao mudar o mês (sem precisar clicar em "Aplicar")
+    mesInput.addEventListener('change', ()=>applyMonth(mesInput.value));
 
     // ===== Funcionários
     function calcPrev(){
@@ -536,7 +539,7 @@
     document.body.addEventListener('click', ev=>{
       const t=ev.target;
 
-      // Editar/Excluir
+      // Editar / Excluir
       if(t.classList.contains('js-edit-c')){
         const id=t.dataset.id;
         const it=cacheCred.find(x=>String(x._rowId)===String(id)); if(!it) return;
@@ -558,7 +561,7 @@
         const id=t.dataset.id;
         const it=cacheCred.find(x=>String(x._rowId)===String(id)); if(!it) return;
         const novoPago = String(it.pago||'Não')==='Sim' ? 'Não' : 'Sim';
-        // Reconstrói payload completo para não perder dados
+        // Reconstrói 'obs' completo para não perder campos
         const ex=parseObs(it.obs||it.observacoes);
         const obsLimpa = String(ex.resto||'').replace(/(?:NF:[^|]+|boleto:[^|]+|venc:[^|]+)\s*\|?\s*/gi,'').trim();
         const obs = extrasToObs(ex.nf, ex.boleto, ex.venc, obsLimpa);
@@ -691,8 +694,7 @@
       const t=ev.target;
       if(t.classList.contains('js-edit-ip')){
         const it=cacheImpParc.find(x=>String(x.id)===String(t.dataset.id)); if(!it) return;
-        ipId.value=it.id; ipDesc.value=it.descricao||''; ipTributo.value=it.tributo||''; ipParcela.value=it.parcela||'';
-        ipVenc.value=/^\d{4}-\d{2}-\d{2}$/.test(it.vencimento)?it.vencimento:''; ipValor.value=String(it.valor).replace('.',','); ipPago.value=it.pago||'Não'; ipObs.value=it.obs||'';
+        ipId.value=it.id; ipDesc.value=it.descricao||''; ipTributo.value=it.tributo||''; ipParcela.value=it.parcela||''; ipVenc.value=/^\d{4}-\d{2}-\d{2}$/.test(it.vencimento)?it.vencimento:''; ipValor.value=String(it.valor).replace('.',','); ipPago.value=it.pago||'Não'; ipObs.value=it.obs||'';
         window.scrollTo({top:0, behavior:'smooth'});
       }
       if(t.classList.contains('js-del-ip')){
@@ -802,7 +804,7 @@
     // Resumo planilha
     btnResumo.addEventListener('click', ()=>{ api.resumo().then(r=>{ if(!r||!r.ok){ alert('Falha ao atualizar resumo.'); return; } sumMsg.textContent='Resumo atualizado na planilha.'; }); });
 
-    // Recarregar
+    // Recarregar manual
     btnReload.addEventListener('click', e=>{
       e.preventDefault(); connectAndLoad();
     });
