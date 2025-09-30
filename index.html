@@ -1,170 +1,260 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GRANTOP • Finanças</title>
-  <link rel="icon" type="image/png" href="logo.png" />
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="config.js"></script>
-  <style>
-    body { background-color: #0b1220; }
-    .card {
-      background: #1e293b;
-      border-radius: 12px;
-      padding: 16px;
-      color: #e2e8f0;
+/***** GRANTOP_Financas V2.3 — Code.gs (JSONP WebApp focado em Créditos)
+ * Compatível com o index.html V2.3 enviado.
+ * Endpoints usados pelo front:
+ *  - GET ?action=ping
+ *  - GET ?action=config
+ *  - GET ?action=setmonth&mes=YYYY-MM
+ *  - GET ?action=listreg
+ *  - GET ?action=savereg&payload=JSON
+ *  - GET ?action=delreg&id=ROWINDEX
+ *  - GET ?action=resumo
+ * Sempre com: token=PUBLIC_TOKEN e callback=<função JSONP>
+ *****/
+
+// ===== CONFIG BÁSICA =====
+const PUBLIC_TOKEN   = '2400';               // mesmo token do index.html
+const PROP_MES_ATUAL = 'MES_ATUAL_ISO';      // yyyy-mm-01 (guardado em DocumentProperties)
+
+// ===== NOMES DE ABAS / CABEÇALHO =====
+const ABA_FAT_BASE = 'Faturamento';          // base / fallback
+const ABA_RESUMO   = 'Resumo Mensal';
+
+const HEAD_FAT = [
+  'Data', 'Cliente', 'Serviço',
+  'Preço (opcional)', 'Valor',
+  'NF? (Sim/Não)', 'NF (opcional)',
+  'Boleto/Recibo', 'Vencimento',
+  'Pago? (Sim/Não)', 'Observações'
+];
+
+// ===== Helpers Gerais =====
+function outputJSONP_(cb, obj){
+  const json = JSON.stringify(obj);
+  if (cb) return ContentService.createTextOutput(`${cb}(${json})`).setMimeType(ContentService.MimeType.JAVASCRIPT);
+  return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
+}
+function getProps_(){ return PropertiesService.getDocumentProperties(); }
+
+function toMonthStartIso_(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`; }
+function normalizeMonthInputToIso_(input){
+  const s=String(input||'').trim();
+  if(/^\d{4}-\d{2}$/.test(s)) return s+'-01';
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m=s.match(/^(\d{2})[\/\-\.](\d{4})$/);
+  if(m){ const mm=Number(m[1]); if(mm>=1 && mm<=12) return `${m[2]}-${m[1]}-01`; }
+  throw new Error('Mês inválido. Use YYYY-MM ou MM/AAAA.');
+}
+function getMesAtualIso_(){
+  const p=getProps_();
+  return p.getProperty(PROP_MES_ATUAL) || toMonthStartIso_(new Date());
+}
+function isoToYYYYMM_(iso){ return String(iso||'').slice(0,7); }
+function isoToLabel_(iso){
+  const [y,m]=String(iso||'').split('-');
+  const nomes=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  return `${nomes[Number(m)-1]}/${y}`;
+}
+
+function toNumber_(v){
+  if(v==='' || v==null) return 0;
+  if(typeof v==='number') return v;
+  const n = Number(String(v).replace(/\./g,'').replace(',','.'));
+  return isNaN(n)?0:n;
+}
+function toDateFromHtml_(ymd){
+  if(!ymd) return '';
+  const m=String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!m) throw new Error('Data inválida: '+ymd);
+  const d=new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+  if(isNaN(d.getTime())) throw new Error('Data inválida: '+ymd);
+  return d;
+}
+function toYMD_(d){
+  if(!(d instanceof Date)) return '';
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// ===== Sheets Helpers =====
+function ss_(){ return SpreadsheetApp.getActive(); }
+function ensureSheet_(name){
+  const ss=ss_();
+  return ss.getSheetByName(name) || ss.insertSheet(name);
+}
+function ensureHeader_(sh, header){
+  const got=sh.getRange(1,1,1,header.length).getValues()[0];
+  const empty = got.every(c=>String(c)==='');
+  if(empty){ sh.getRange(1,1,1,header.length).setValues([header]); sh.setFrozenRows(1); }
+  return sh;
+}
+
+// Retorna a aba de faturamento para o YYYY-MM da propriedade MES_ATUAL
+function getFatSheetForCurrentMonth_(){
+  const iso = getMesAtualIso_();
+  const yyyymm = isoToYYYYMM_(iso);
+  const ss = ss_();
+  const tabName = `${ABA_FAT_BASE} ${yyyymm}`;          // ex.: "Faturamento 2025-09"
+  let sh = ss.getSheetByName(tabName);
+  if(!sh){
+    // tenta fallback "Faturamento"
+    sh = ss.getSheetByName(ABA_FAT_BASE);
+    if(!sh){
+      // cria a com mês
+      sh = ss.insertSheet(tabName);
+    }else{
+      // se existe a base e NÃO existe a do mês, é melhor criar a do mês
+      sh = ss.insertSheet(tabName);
     }
-    .kpi {
-      background: #1e293b;
-      border-radius: 10px;
-      padding: 12px;
-      text-align: center;
-      color: #fff;
-      font-weight: 600;
-    }
-    .kpi span {
-      display: block;
-      font-size: 1.2rem;
-      margin-top: 6px;
-    }
-    /* Overlay do PIN */
-    #__pin_gate__{
-      position:fixed; inset:0; z-index:99999;
-      display:flex; align-items:center; justify-content:center;
-      background:#0b1220;
-    }
-    #__pin_card__{
-      width:min(92%,380px); background:#1e293b; color:#e2e8f0;
-      border:1px solid #334155; border-radius:12px; padding:20px;
-      box-shadow:0 10px 30px rgba(0,0,0,.4);
-      text-align:center;
-    }
-    #__pin_card__ input{
-      width:100%; padding:10px 12px; border-radius:8px; border:1px solid #334155;
-      background:#0b1220; color:#e2e8f0; outline:none;
-    }
-    #__pin_card__ button{
-      width:100%; margin-top:10px; padding:10px 12px; border-radius:8px;
-      background:#3b82f6; color:#fff; font-weight:600; border:1px solid #2563eb;
-    }
-    #__pin_err__{ color:#fecaca; min-height:18px; margin-top:6px; font-size:.85rem; }
-  </style>
-</head>
-<body class="text-slate-200">
+  }
+  return ensureHeader_(sh, HEAD_FAT);
+}
 
-  <!-- Overlay do PIN -->
-  <div id="__pin_gate__" style="display:none">
-    <div id="__pin_card__">
-      <img src="logo.png" alt="GRANTOP" style="height:40px; opacity:.9; margin:0 auto 12px auto; display:block" />
-      <h3 style="font-weight:700; margin-bottom:6px">Acesso restrito</h3>
-      <p style="opacity:.8; font-size:.9rem; margin-bottom:12px">Informe o PIN para entrar.</p>
-      <input id="__pin_input__" type="password" placeholder="PIN" />
-      <div id="__pin_err__"></div>
-      <button id="__pin_btn__">Entrar</button>
-      <div style="margin-top:10px; font-size:.85rem; opacity:.7">
-        <a href="#" id="__pin_logout__" style="text-decoration:underline; color:#93c5fd">Sair / trocar usuário</a>
-      </div>
-    </div>
-  </div>
+// ====== API: CONFIG / MÊS ======
+function api_config(){
+  const iso = getMesAtualIso_();
+  return {
+    mesAtualIso: iso,
+    mesAtualYYYYMM: isoToYYYYMM_(iso),
+    mesAtualLabel: isoToLabel_(iso),
+    spreadsheetId: ss_().getId(),
+    tz: Session.getScriptTimeZone()
+  };
+}
+function api_setmonth(mesInput){
+  const iso = normalizeMonthInputToIso_(mesInput);
+  getProps_().setProperty(PROP_MES_ATUAL, iso);
+  // garante a aba do mês
+  const sh = getFatSheetForCurrentMonth_();
+  sh.autoResizeColumns(1, HEAD_FAT.length);
+  return { ok:true, mesAtualIso: iso, mesAtualYYYYMM: isoToYYYYMM_(iso), mesAtualLabel: isoToLabel_(iso) };
+}
 
-  <!-- Header -->
-  <header class="p-4 flex items-center justify-between bg-slate-900 shadow">
-    <div class="flex items-center gap-3">
-      <img src="logo.png" alt="GRANTOP" class="h-10" />
-      <h1 class="text-xl font-bold">GRANTOP • <span class="text-sky-400">Finanças</span></h1>
-    </div>
-    <button id="btnLogout" class="bg-red-600 px-3 py-1 rounded">Sair (PIN)</button>
-  </header>
+// ====== API: CRÉDITOS (Faturamento) ======
 
-  <!-- KPIs -->
-  <section class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4">
-    <div class="kpi">Créditos (Total)<span id="kpiCreditos">R$ 0,00</span></div>
-    <div class="kpi">Folha (Total)<span id="kpiFolha">R$ 0,00</span></div>
-    <div class="kpi">Fixas Pendentes<span id="kpiFixas">R$ 0,00</span></div>
-    <div class="kpi">Saldo Previsto<span id="kpiSaldo">R$ 0,00</span></div>
-  </section>
+// Lista os registros da aba do mês atual
+function api_listreg(){
+  const sh = getFatSheetForCurrentMonth_();
+  const last=sh.getLastRow();
+  const out=[];
+  if(last>=2){
+    const vals = sh.getRange(2,1,last-1, Math.max(HEAD_FAT.length, 11)).getValues();
+    for(let i=0;i<vals.length;i++){
+      const r=vals[i]; if(!r || (r.every(c=>String(c)===''))) continue;
+      const rowIndex = 2+i;
+      const nfNum   = String(r[6]||'').trim();
+      const boleto  = String(r[7]||'').trim();
+      const venc    = r[8] instanceof Date ? toYMD_(r[8]) : String(r[8]||'').trim();
+      const obsLivre= String(r[10]||'').trim();
+      const extra=[]; if(nfNum) extra.push('NF:'+nfNum); if(boleto) extra.push('boleto:'+boleto); if(venc) extra.push('venc:'+venc); if(obsLivre) extra.push(obsLivre);
 
-  <!-- Abas -->
-  <nav class="p-4 flex flex-wrap gap-2">
-    <button class="tab px-3 py-1 bg-blue-600 rounded" data-tab="funcionarios">Funcionários</button>
-    <button class="tab px-3 py-1 bg-blue-600 rounded" data-tab="creditos">Créditos</button>
-    <button class="tab px-3 py-1 bg-blue-600 rounded" data-tab="fixas">Contas Fixas</button>
-    <button class="tab px-3 py-1 bg-blue-600 rounded" data-tab="empresa">Contas da Empresa</button>
-    <button class="tab px-3 py-1 bg-blue-600 rounded" data-tab="parcelados">Impostos Parcelados</button>
-    <button class="tab px-3 py-1 bg-blue-600 rounded" data-tab="imposto">Imposto do Mês</button>
-    <button class="tab px-3 py-1 bg-blue-600 rounded" data-tab="clientes">Clientes</button>
-    <button class="tab px-3 py-1 bg-blue-600 rounded" data-tab="resumo">Resumo</button>
-  </nav>
-
-  <!-- Conteúdo -->
-  <main class="p-4">
-    <div id="tab-funcionarios" class="tab-content card">
-      <h2 class="font-bold mb-2">Funcionários</h2>
-      <p>Cadastro e folha de pagamento dos funcionários.</p>
-      <table class="w-full mt-2 text-sm">
-        <thead><tr><th>ID</th><th>Nome</th><th>Salário</th><th>Total</th><th>Ações</th></tr></thead>
-        <tbody id="tableFuncionarios"><tr><td colspan="5">Sem funcionários.</td></tr></tbody>
-      </table>
-    </div>
-
-    <div id="tab-creditos" class="tab-content card hidden">
-      <h2 class="font-bold mb-2">Créditos</h2>
-      <p>Em breve...</p>
-    </div>
-
-    <!-- Outras abas omitidas aqui mas já ficam como placeholders -->
-    <div id="tab-fixas" class="tab-content card hidden"><h2>Contas Fixas</h2><p>Em breve...</p></div>
-    <div id="tab-empresa" class="tab-content card hidden"><h2>Contas da Empresa</h2><p>Em breve...</p></div>
-    <div id="tab-parcelados" class="tab-content card hidden"><h2>Impostos Parcelados</h2><p>Em breve...</p></div>
-    <div id="tab-imposto" class="tab-content card hidden"><h2>Imposto do Mês</h2><p>Em breve...</p></div>
-    <div id="tab-clientes" class="tab-content card hidden"><h2>Clientes</h2><p>Em breve...</p></div>
-    <div id="tab-resumo" class="tab-content card hidden"><h2>Resumo</h2><p>Em breve...</p></div>
-  </main>
-
-  <script>
-    // Controle de abas
-    document.querySelectorAll(".tab").forEach(btn=>{
-      btn.addEventListener("click", ()=>{
-        document.querySelectorAll(".tab-content").forEach(c=>c.classList.add("hidden"));
-        document.querySelector("#tab-"+btn.dataset.tab).classList.remove("hidden");
+      out.push({
+        _rowId: rowIndex,
+        data: (r[0] instanceof Date) ? toYMD_(r[0]) : String(r[0]||''),
+        cliente: String(r[1]||''),
+        servico: String(r[2]||''),
+        valor: Number(r[4])||0,
+        pago: String(r[9]||''),
+        obs: extra.join(' | ')
       });
-    });
+    }
+  }
+  return out;
+}
 
-    // Logout PIN
-    document.getElementById("btnLogout").addEventListener("click", ()=>{
-      localStorage.removeItem('grantop_pin_ok');
-      location.reload();
-    });
+/**
+ * Salva registro de crédito
+ * payload: { id?:rowIndex, data(yyyy-mm-dd), cliente, servico, valor, pago('Sim'|'Não'), obs('NF:... | boleto:... | venc:yyyy-mm-dd | ...') }
+ */
+function api_savereg(payload){
+  const sh = getFatSheetForCurrentMonth_();
+  const dt = payload.data ? toDateFromHtml_(payload.data) : '';
+  const val= toNumber_(payload.valor);
+  const obsStr = String(payload.obs||'');
+  const mNF=obsStr.match(/NF:([^|]+)/i), mL=obsStr.match(/boleto:([^|]+)/i), mV=obsStr.match(/venc:([\d-]+)/i);
+  const obsLivre = obsStr.replace(/(?:NF:[^|]+|boleto:[^|]+|venc:[^|]+)\s*\|?\s*/gi,'').trim();
 
-    // Gate do PIN
-    (function PINGate(){
-      const PIN = "2400"; // PIN fixo
-      const gate = document.getElementById('__pin_gate__');
-      const input = document.getElementById('__pin_input__');
-      const btn = document.getElementById('__pin_btn__');
-      const err = document.getElementById('__pin_err__');
-      const logout = document.getElementById('__pin_logout__');
+  const linha = [
+    dt, payload.cliente||'', payload.servico||'',
+    '', val,
+    payload.pago==='Sim' ? 'Sim' : 'Não',
+    mNF?mNF[1].trim():'', mL?mL[1].trim():'',
+    mV?toDateFromHtml_(mV[1].trim()):'',
+    payload.pago==='Sim' ? 'Sim' : 'Não',
+    obsLivre
+  ];
 
-      function openApp(){ gate.style.display = 'none'; }
-      function showGate(){ gate.style.display = 'flex'; input.focus(); }
-      function tryEnter(){
-        if (String(input.value||'') === PIN){
-          localStorage.setItem('grantop_pin_ok','1');
-          openApp();
-        } else {
-          err.textContent = 'PIN incorreto';
-          input.select();
-        }
+  if(payload.id){
+    const row=Number(payload.id);
+    if(row<=1 || row>sh.getLastRow()) throw new Error('Linha inválida.');
+    sh.getRange(row,1,1,linha.length).setValues([linha]);
+    // formatos
+    sh.getRange(row,1).setNumberFormat('dd/mm/yyyy');
+    sh.getRange(row,9).setNumberFormat('dd/mm/yyyy');
+    sh.getRange(row,5).setNumberFormat('R$ #,##0.00');
+    return {ok:true, id:row};
+  }else{
+    sh.appendRow(linha);
+    const lr=sh.getLastRow();
+    sh.getRange(lr,1).setNumberFormat('dd/mm/yyyy');
+    sh.getRange(lr,9).setNumberFormat('dd/mm/yyyy');
+    sh.getRange(lr,5).setNumberFormat('R$ #,##0.00');
+    return {ok:true, id:lr};
+  }
+}
+
+function api_delreg(rowIndex){
+  const sh = getFatSheetForCurrentMonth_();
+  const r=Number(rowIndex);
+  if(r<=1 || r>sh.getLastRow()) throw new Error('Linha inválida.');
+  sh.deleteRow(r);
+  return {ok:true};
+}
+
+// ====== API: RESUMO (stub simples) ======
+function api_resumo(){
+  const sh = ensureSheet_(ABA_RESUMO);
+  const iso=getMesAtualIso_(), label=isoToLabel_(iso);
+  sh.clear();
+  sh.getRange(1,1).setValue('Resumo — '+label).setFontWeight('bold').setFontSize(14);
+  sh.setFrozenRows(1);
+  return {ok:true};
+}
+
+// ====== WEB (JSONP) ======
+function doGet(e){
+  try{
+    const p = e && e.parameter ? e.parameter : {};
+    const cb = p.callback || null;
+
+    if (!p.token || p.token !== PUBLIC_TOKEN){
+      return outputJSONP_(cb, {ok:false, error:'Unauthorized'});
+    }
+
+    const a = String(p.action||'').toLowerCase();
+    let result;
+
+    switch(a){
+      case 'ping':    result={ok:true,time:new Date()}; break;
+      case 'config':  result=api_config(); break;
+      case 'setmonth':{
+        const mes = p.mes || p.month || p.m;
+        result = api_setmonth(mes);
+        break;
       }
 
-      if (localStorage.getItem('grantop_pin_ok') === '1'){ openApp(); }
-      else { showGate(); }
+      // Créditos (Faturamento)
+      case 'listreg': result = api_listreg(); break;
+      case 'savereg': result = api_savereg( JSON.parse(p.payload||'{}') ); break;
+      case 'delreg':  result = api_delreg(p.id); break;
 
-      btn.addEventListener('click', tryEnter);
-      input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') tryEnter(); });
-      logout.addEventListener('click', (e)=>{ e.preventDefault(); localStorage.removeItem('grantop_pin_ok'); showGate(); });
-    })();
-  </script>
-</body>
-</html>
+      case 'resumo':  result = api_resumo(); break;
+
+      default:
+        throw new Error('Ação inválida');
+    }
+
+    return outputJSONP_(cb, {ok:true, result});
+  }catch(err){
+    const cb = e && e.parameter ? e.parameter.callback : null;
+    return outputJSONP_(cb, {ok:false, error:String(err)});
+  }
+}
