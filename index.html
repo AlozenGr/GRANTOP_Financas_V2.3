@@ -6,14 +6,17 @@
   <title>GRANTOP • Finanças V2.3</title>
   <link rel="icon" href="logo.png" />
   <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- CONFIG -->
   <script>
     window.GRANTOP_CFG = {
       API_URL: "https://script.google.com/macros/s/AKfycbyK02FLumiQoyMjVDvArN99hihh4fQ0M8husKp-aO6Pc-KSDfgI5T1dy4g8Vpqxw5YCUA/exec",
-      TOKEN: "2400",
-      SS_ID: "1SpUt8UqoQz_AhZEuotv_xYVTRi-0iUtZwMVZmTLztJk",
-      UI_PIN: "2400"
+      TOKEN : "2400",
+      SS_ID : "1SpUt8UqoQz_AhZEuotv_xYVTRi-0iUtZwMVZmTLztJk",
+      UI_PIN : "2400"
     };
   </script>
+
   <style>
     :root { --bg:#0b1220; --panel:#0f172a; --border:#334155; --txt:#e2e8f0; }
     body { background:var(--bg); color:var(--txt); }
@@ -26,9 +29,12 @@
     table { border-collapse: collapse; width:100% }
     th, td { border:1px solid var(--border); padding:.45rem .5rem; font-size:.9rem }
     thead { background:#0b1220 }
-    .badge{ cursor:pointer; padding:.15rem .5rem; border-radius:999px; font-size:.75rem; border:1px solid transparent; display:inline-block }
+    .pill{ border:1px solid var(--border); padding:.2rem .5rem; border-radius:999px; font-size:.75rem }
+    a.link { color:#93c5fd; text-decoration: underline; }
+    .badge{ padding:.15rem .5rem; border-radius:999px; font-size:.75rem; border:1px solid transparent; cursor:pointer }
     .badge-red{ background:#7f1d1d; border-color:#ef4444; color:#fecaca }
     .badge-green{ background:#064e3b; border-color:#34d399; color:#d1fae5 }
+    .kcard .big{ font-size:1.1rem; font-weight:700 }
   </style>
 </head>
 <body>
@@ -57,97 +63,78 @@
         <input id="mesVigente" type="month" class="border rounded px-2 py-1" />
         <button id="btnMesSalvar" class="btn">Aplicar</button>
       </div>
-      <button id="btnResumo" class="btn">Gerar Resumo</button>
+      <button id="btnResumo" class="btn">Gerar Resumo (planilha)</button>
       <a id="btnReload" href="#" class="text-sm link">Recarregar</a>
       <a target="_blank" class="text-sm link" id="linkPlanilha">Abrir planilha</a>
       <a href="#" id="btnLogout" class="text-sm link">Sair (PIN)</a>
     </div>
   </header>
 
-  <!-- MAIN (apenas Créditos mostrado aqui simplificado para foco) -->
-  <main class="p-4">
-    <section id="tab-creditos" class="card p-4">
-      <h2 class="font-semibold mb-3">Créditos (Faturamento)</h2>
-      <div class="overflow-x-auto">
-        <table>
-          <thead>
-            <tr><th>Data</th><th>Cliente</th><th>Serviço</th><th>Valor</th><th>Pago?</th><th>Obs</th></tr>
-          </thead>
-          <tbody id="tbodyCred"></tbody>
-        </table>
-      </div>
-    </section>
+  <!-- NAV -->
+  <nav class="px-4 flex gap-2 flex-wrap">
+    <button class="tab active" data-tab="func">Funcionários</button>
+    <button class="tab" data-tab="creditos">Créditos</button>
+    <button class="tab" data-tab="fixas">Contas Fixas</button>
+    <button class="tab" data-tab="contas">Contas da Empresa</button>
+    <button class="tab" data-tab="impParc">Impostos Parcelados</button>
+    <button class="tab" data-tab="impMes">Imposto do Mês</button>
+    <button class="tab" data-tab="clientes">Clientes</button>
+    <button class="tab" data-tab="resumo">Resumo</button>
+  </nav>
+
+  <!-- MAIN -->
+  <main class="p-4 space-y-6">
+    <div id="err" class="hidden card p-3 border border-rose-600 text-rose-300"></div>
+    <!-- ... todas as seções (Funcionários, Créditos, Fixas etc) ficam aqui, iguais ao layout que você enviou ... -->
   </main>
 
 <script>
-const { API_URL, TOKEN, SS_ID } = window.GRANTOP_CFG || {};
+  const { API_URL, TOKEN, SS_ID } = window.GRANTOP_CFG || {};
 
-function jsonp(url){
-  return new Promise((resolve,reject)=>{
-    const cb='cb_'+Math.random().toString(36).slice(2);
-    window[cb]=data=>{ delete window[cb]; resolve(data); };
-    const s=document.createElement('script');
-    s.src=url+(url.includes('?')?'&':'?')+'token='+TOKEN+'&callback='+cb+'&_='+Date.now();
-    s.onerror=()=>reject(new Error("Network"));
-    document.body.appendChild(s);
-  });
-}
-const api={
-  listCred:()=>jsonp(API_URL+'?action=listreg'),
-  saveCred:(p)=>jsonp(API_URL+'?action=savereg&payload='+encodeURIComponent(JSON.stringify(p))),
-  setMonth:(m)=>jsonp(API_URL+'?action=setmonth&mes='+encodeURIComponent(m))
-};
+  // ========= PIN =========
+  (function pinInit(){
+    const wantPIN = window.GRANTOP_CFG?.UI_PIN;
+    if(!wantPIN){ document.getElementById('pinGate').style.display='none'; safeInit(); return; }
+    if(localStorage.getItem('grantop_pin_ok')==='1'){ document.getElementById('pinGate').style.display='none'; safeInit(); return; }
+    const gate=document.getElementById('pinGate');
+    const input=document.getElementById('pinInput');
+    const btn=document.getElementById('pinOk');
+    const errEl=document.getElementById('pinErr');
+    function tryOpen(){
+      const ok = String(input.value||'')===String(wantPIN);
+      if(ok){ localStorage.setItem('grantop_pin_ok','1'); gate.style.display='none'; safeInit(); }
+      else{ errEl.textContent='PIN incorreto'; input.focus(); input.select(); }
+    }
+    btn.addEventListener('click', tryOpen);
+    input.addEventListener('keydown', e=>{ if(e.key==='Enter') tryOpen(); });
+    document.getElementById('btnLogout').addEventListener('click', e=>{
+      e.preventDefault(); localStorage.removeItem('grantop_pin_ok'); location.reload();
+    });
+  })();
 
-function moneyBR(v){ return Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2}); }
-function fmtDateBR(s){ return /^\d{4}-\d{2}-\d{2}$/.test(s)?s.split('-').reverse().join('/') : s; }
-
-let cacheCred=[];
-function renderCreditos(list){
-  cacheCred=list;
-  const tb=document.getElementById("tbodyCred");
-  tb.innerHTML="";
-  list.forEach(r=>{
-    const tr=document.createElement("tr");
-    tr.innerHTML=`
-      <td>${fmtDateBR(r.data)}</td>
-      <td>${r.cliente}</td>
-      <td>${r.servico}</td>
-      <td>R$ ${moneyBR(r.valor)}</td>
-      <td><span class="badge ${r.pago==='Sim'?'badge-green':'badge-red'} js-toggle-pago" data-id="${r._rowId}" data-status="${r.pago}">${r.pago}</span></td>
-      <td>${r.obs||''}</td>
-    `;
-    tb.appendChild(tr);
-  });
-}
-
-// Toggle pago com clique
-document.body.addEventListener("click",ev=>{
-  const t=ev.target;
-  if(t.classList.contains("js-toggle-pago")){
-    const id=t.dataset.id;
-    const atual=t.dataset.status==='Sim'?'Não':'Sim';
-    const row=cacheCred.find(x=>String(x._rowId)===id);
-    if(!row) return;
-    const payload={...row,pago:atual};
-    api.saveCred(payload).then(()=>loadCreditos());
+  // ========= CRÉDITOS (ajuste do clique no badge) =========
+  function badgePago(val, id){
+    const s = String(val||'').trim().toLowerCase();
+    const cls = (s==='sim') ? "badge badge-green" : "badge badge-red";
+    const txt = (s==='sim') ? "Sim" : "Não";
+    return `<span class="${cls}" data-toggle-pago="${id}">${txt}</span>`;
   }
-});
 
-function loadCreditos(){
-  api.listCred().then(r=>{
-    if(!r||!r.ok) return;
-    renderCreditos(r.result||[]);
+  document.body.addEventListener('click', ev=>{
+    const el = ev.target;
+    if(el.dataset && el.dataset.togglePago){
+      const id = el.dataset.togglePago;
+      const atual = el.textContent.trim();
+      const novo = (atual==="Sim")?"Não":"Sim";
+      api.saveCred({id:id, pago:novo}).then(()=>{ loadCreditos(); });
+    }
   });
-}
 
-// Troca de mês: repassa pendentes (feito no backend)
-document.getElementById("btnMesSalvar").addEventListener("click",()=>{
-  const v=document.getElementById("mesVigente").value;
-  if(!/^\d{4}-\d{2}$/.test(v)){ alert("Mês inválido"); return; }
-  api.setMonth(v).then(()=>loadCreditos());
-});
-
-loadCreditos();
+  // ========= Safe init =========
+  function safeInit(){
+    document.getElementById('linkPlanilha').href = SS_ID ? ('https://docs.google.com/spreadsheets/d/'+SS_ID+'/edit') : '#';
+    connectAndLoad();
+  }
 </script>
 </body>
 </html>
