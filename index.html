@@ -1,314 +1,153 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GRANTOP • Finanças V2.3</title>
-  <link rel="icon" type="image/png" href="logo.png"/>
+  <link rel="icon" href="logo.png" />
   <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    body{background:#0b1220;color:#e2e8f0}
-    .card{background:#0f172a;border:1px solid #334155;border-radius:14px;padding:14px}
-    .pill{border:1px solid #334155;border-radius:9999px;padding:.4rem .75rem;background:#0b1220}
-    .btn{border:1px solid #334155;border-radius:.6rem;padding:.5rem .9rem;background:#0e1627}
-    .btn:hover{background:#14213b}
-    .input{background:#0a0f1a;border:1px solid #334155;border-radius:.5rem;padding:.55rem .7rem;outline:none}
-    table{border-collapse:collapse;width:100%}
-    th,td{border-bottom:1px solid #1f2937;padding:.55rem;font-size:.92rem}
-    .badge{display:inline-block;padding:.2rem .55rem;border-radius:9999px;border:1px solid transparent;font-size:.75rem}
-    .b-green{background:#065f46;color:#d1fae5;border-color:#10b981;cursor:pointer}
-    .b-red{background:#7f1d1d;color:#fecaca;border-color:#ef4444;cursor:pointer}
-    /* PIN overlay */
-    #pinGate{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0b1220;z-index:9999}
-    #pinCard{width:min(92%,380px);background:#0f172a;border:1px solid #334155;border-radius:14px;padding:18px;text-align:center}
-    #pinCard input{width:100%;padding:10px;border-radius:8px;background:#0a0f1a;border:1px solid #334155;color:#e2e8f0}
-    #pinErr{color:#fecaca;min-height:18px;margin-top:6px;font-size:.85rem}
-  </style>
-
   <script>
-    /* ====== CONFIG ====== */
-    // Troque se reimplantar o Web App:
-    const API_URL = 'https://script.google.com/macros/s/AKfycbyK02FLumiQoyMjVDvArN99hihh4fQ0M8husKp-aO6Pc-KSDfgI5T1dy4g8Vpqxw5YCUA/exec';
-    const TOKEN   = '2400';     // mesmo do Code.gs (PUBLIC_TOKEN)
-    const UI_PIN  = '2400';     // apenas para o portão de acesso no HTML
-
-    /* ====== Utils ====== */
-    const moneyBR  = v => Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2});
-    const toNumber = v => v? Number(String(v).replace(/\./g,'').replace(',','.'))||0 : 0;
-    const fmtDate  = v => { if(!v) return ''; const s=String(v).split('T')[0]; return /^\d{4}-\d{2}-\d{2}$/.test(s)? s : s; };
-
-    // JSONP helper (sem CORS)
-    function jsonp(url, timeout=15000){
-      return new Promise((resolve,reject)=>{
-        const cb='cb_'+Math.random().toString(36).slice(2);
-        const s=document.createElement('script');
-        const done=()=>{ try{s.remove();}catch(e){} delete window[cb]; };
-        const t=setTimeout(()=>{ done(); reject(new Error('timeout')); }, timeout);
-        window[cb]=data=>{ clearTimeout(t); done(); resolve(data); };
-        s.src = url + (url.includes('?')?'&':'?') + 'token=' + encodeURIComponent(TOKEN) + '&callback=' + cb + '&_=' + Date.now();
-        s.onerror=()=>{ clearTimeout(t); done(); reject(new Error('network')); };
-        document.body.appendChild(s);
-      });
-    }
-
-    // API client
-    const api={
-      ping:    ()=>jsonp(API_URL+'?action=ping'),
-      config:  ()=>jsonp(API_URL+'?action=config'),
-      setMonth:(yyyymm)=>jsonp(API_URL+'?action=setmonth&mes='+encodeURIComponent(yyyymm)),
-      listReg: ()=>jsonp(API_URL+'?action=listreg'),
-      saveReg: (payload)=>jsonp(API_URL+'?action=savereg&payload='+encodeURIComponent(JSON.stringify(payload))),
-      delReg:  (row)=>jsonp(API_URL+'?action=delreg&id='+encodeURIComponent(row)),
-      resumo:  ()=>jsonp(API_URL+'?action=resumo')
+    window.GRANTOP_CFG = {
+      API_URL: "https://script.google.com/macros/s/AKfycbyK02FLumiQoyMjVDvArN99hihh4fQ0M8husKp-aO6Pc-KSDfgI5T1dy4g8Vpqxw5YCUA/exec",
+      TOKEN: "2400",
+      SS_ID: "1SpUt8UqoQz_AhZEuotv_xYVTRi-0iUtZwMVZmTLztJk",
+      UI_PIN: "2400"
     };
-
-    // Estado
-    let cacheCreditos=[];  // rows do mês atual
-
-    /* ====== Render ====== */
-    function renderTabelaCreditos(rows){
-      cacheCreditos=rows.slice();
-      const tb=document.getElementById('tbodyCred');
-      tb.innerHTML='';
-      if(rows.length===0){
-        tb.innerHTML='<tr><td colspan="9" class="text-slate-400 text-center">Sem lançamentos neste mês.</td></tr>';
-        recalcKPIs();
-        return;
-      }
-      rows.forEach(r=>{
-        const pagoBtn = (String(r.pago).toLowerCase()==='sim')
-          ? `<span class="badge b-green js-toggle" data-id="${r._rowId}" data-pago="Sim">Sim</span>`
-          : `<span class="badge b-red js-toggle" data-id="${r._rowId}" data-pago="Não">Não</span>`;
-        const tr=document.createElement('tr');
-        tr.innerHTML = `
-          <td>${fmtDate(r.data)}</td>
-          <td>${r.cliente||''}</td>
-          <td>${r.servico||''}</td>
-          <td class="text-right">R$ ${moneyBR(r.valor)}</td>
-          <td>${pagoBtn}</td>
-          <td>${r.obs||''}</td>
-          <td class="text-right">
-            <button class="btn text-xs js-edit" data-id="${r._rowId}">Editar</button>
-            <button class="btn text-xs js-del"  data-id="${r._rowId}">Excluir</button>
-          </td>`;
-        tb.appendChild(tr);
-      });
-      recalcKPIs();
-    }
-
-    function recalcKPIs(){
-      const credTot = cacheCreditos.reduce((s,x)=>s+Number(x.valor||0),0);
-      const folhaTot= 0; // nesta V2.3 focada em créditos não calculamos folha
-      const fixPend = 0; // idem
-      const saldoPrev = credTot - (folhaTot + fixPend);
-      document.getElementById('kCredTot').textContent = 'R$ '+moneyBR(credTot);
-      document.getElementById('kFolhaTot').textContent = 'R$ '+moneyBR(folhaTot);
-      document.getElementById('kFixPend').textContent  = 'R$ '+moneyBR(fixPend);
-      document.getElementById('kSaldoPrev').textContent= 'R$ '+moneyBR(saldoPrev);
-    }
-
-    /* ====== Eventos UI ====== */
-    // Salvar crédito
-    async function onSalvarCredito(e){
-      e.preventDefault();
-      const p={
-        id: crId.value || undefined,
-        data: crData.value,
-        cliente: crCliente.value.trim(),
-        servico: crServico.value.trim(),
-        valor: toNumber(crValor.value),
-        pago:  crPago.value,
-        obs:   buildObs(crNF.value, crBoleto.value, crVenc.value, crObs.value)
-      };
-      try{
-        const r = await api.saveReg(p);
-        if(!r || !r.ok){ alert('Falha ao salvar crédito.'); return; }
-        formCred.reset(); crId.value='';
-        await loadEverything(); // recarrega tabela
-      }catch(err){ alert('Falha ao salvar crédito.'); }
-    }
-
-    function buildObs(nf,link,venc,livre){
-      const p=[]; if(nf) p.push('NF:'+nf); if(link) p.push('boleto:'+link); if(venc) p.push('venc:'+venc); if(livre) p.push(livre);
-      return p.join(' | ');
-    }
-
-    // Clicks na tabela (editar / excluir / toggle pago)
-    document.addEventListener('click', async (ev)=>{
-      const t=ev.target;
-      // Toggle pago com 1 clique
-      if(t.classList.contains('js-toggle')){
-        const id = Number(t.dataset.id);
-        const row = cacheCreditos.find(x=>Number(x._rowId)===id);
-        if(!row) return;
-        const novoPago = (String(row.pago).toLowerCase()==='sim') ? 'Não' : 'Sim';
-        const payload = {
-          id: id,
-          data: row.data || '', cliente: row.cliente||'', servico: row.servico||'',
-          valor: row.valor||0, pago: novoPago, obs: row.obs||''
-        };
-        try{
-          const r=await api.saveReg(payload);
-          if(!r || !r.ok){ alert('Falha ao atualizar pago.'); return; }
-          await loadEverything();
-        }catch(err){ alert('Falha ao atualizar pago.'); }
-      }
-      // Editar
-      if(t.classList.contains('js-edit')){
-        const id=Number(t.dataset.id);
-        const it=cacheCreditos.find(x=>Number(x._rowId)===id);
-        if(!it) return;
-        crId.value=id;
-        crData.value= /^\d{4}-\d{2}-\d{2}$/.test(it.data)?it.data:'';
-        crCliente.value=it.cliente||'';
-        crServico.value=it.servico||'';
-        crValor.value=String(it.valor).replace('.',',');
-        crPago.value = (String(it.pago).toLowerCase()==='sim')?'Sim':'Não';
-        // não vamos tentar remontar NF/Boleto/Venc do campo obs — o usuário pode reescrever
-        crNF.value=''; crBoleto.value=''; crVenc.value=''; crObs.value=it.obs||'';
-        window.scrollTo({top:0, behavior:'smooth'});
-      }
-      // Excluir
-      if(t.classList.contains('js-del')){
-        const id=Number(t.dataset.id);
-        if(!confirm('Excluir esse lançamento?')) return;
-        try{
-          const r=await api.delReg(id);
-          if(!r || !r.ok){ alert('Falha ao excluir.'); return; }
-          await loadEverything();
-        }catch(err){ alert('Falha ao excluir.'); }
-      }
-    });
-
-    // Mês vigente
-    btnAplicarMes.addEventListener('click', async ()=>{
-      const m = mesVigente.value; // yyyy-mm
-      if(!/^\d{4}-\d{2}$/.test(m)){ alert('Selecione um mês válido.'); return; }
-      try{
-        const r=await api.setMonth(m);
-        if(!r || !r.ok){ alert('Falha ao aplicar mês.'); return; }
-        await loadEverything();
-      }catch(err){ alert('Falha ao aplicar mês.'); }
-    });
-
-    // Resumo (planilha)
-    btnResumo.addEventListener('click', async ()=>{
-      try{
-        const r=await api.resumo();
-        if(!r || !r.ok){ alert('Falha ao gerar resumo.'); return; }
-        alert('Resumo atualizado na planilha.');
-      }catch(err){ alert('Falha ao gerar resumo.'); }
-    });
-
-    /* ====== Carregar tudo ====== */
-    async function loadEverything(){
-      try{
-        const [cfg, regs] = await Promise.all([ api.config(), api.listReg() ]);
-        const info = cfg?.result || cfg; // tolerância
-        if(info?.mesAtualYYYYMM) mesVigente.value = info.mesAtualYYYYMM;
-        renderTabelaCreditos((regs?.result)||regs||[]);
-      }catch(err){
-        console.error(err);
-        alert('Falha ao conectar.');
-      }
-    }
-
-    /* ====== PIN gate ====== */
-    function pinInit(){
-      const gate=document.getElementById('pinGate');
-      const input=document.getElementById('pinInput');
-      const btn=document.getElementById('pinBtn');
-      const err=document.getElementById('pinErr');
-      function open(){ gate.style.display='none'; loadEverything(); }
-      function show(){ gate.style.display='flex'; input.focus(); }
-      function tryOpen(){
-        if(String(input.value||'')===String(UI_PIN)){ localStorage.setItem('grantop_pin_ok','1'); open(); }
-        else{ err.textContent='PIN incorreto'; input.select(); }
-      }
-      if(localStorage.getItem('grantop_pin_ok')==='1'){ open(); }
-      else{ show(); }
-      btn.addEventListener('click', tryOpen);
-      input.addEventListener('keydown', e=>{ if(e.key==='Enter') tryOpen(); });
-      btnLogout.addEventListener('click', ()=>{ localStorage.removeItem('grantop_pin_ok'); location.reload(); });
-    }
-
-    document.addEventListener('DOMContentLoaded', ()=>{
-      pinInit();
-      formCred.addEventListener('submit', onSalvarCredito);
-    });
   </script>
+  <style>
+    :root { --bg:#0b1220; --panel:#0f172a; --border:#334155; --txt:#e2e8f0; }
+    body { background:var(--bg); color:var(--txt); }
+    .card{ border:1px solid #33415566; border-radius:12px; background:var(--panel); box-shadow:0 1px 2px rgba(0,0,0,.25) }
+    .btn{ display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--border); border-radius:8px; padding:.45rem .75rem; background:var(--panel) }
+    .btn:hover{ background:#0b1220 }
+    .tab{ border:1px solid var(--border); border-radius:9999px; padding:.4rem .8rem; }
+    .tab.active{ outline:2px solid #60a5fa; }
+    input, select{ background:#0b1220; border:1px solid var(--border); border-radius:8px; padding:.5rem .65rem; width:100% }
+    table { border-collapse: collapse; width:100% }
+    th, td { border:1px solid var(--border); padding:.45rem .5rem; font-size:.9rem }
+    thead { background:#0b1220 }
+    .badge{ cursor:pointer; padding:.15rem .5rem; border-radius:999px; font-size:.75rem; border:1px solid transparent; display:inline-block }
+    .badge-red{ background:#7f1d1d; border-color:#ef4444; color:#fecaca }
+    .badge-green{ background:#064e3b; border-color:#34d399; color:#d1fae5 }
+  </style>
 </head>
 <body>
-  <!-- PIN overlay -->
-  <div id="pinGate">
-    <div id="pinCard">
-      <img src="logo.png" alt="GRANTOP" style="height:40px;opacity:.9;margin:0 auto 10px;display:block">
-      <div class="text-lg font-semibold mb-1">Acesso restrito</div>
-      <div class="text-sm opacity-80 mb-3">Informe o PIN para entrar.</div>
-      <input id="pinInput" type="password" placeholder="PIN">
-      <div id="pinErr"></div>
-      <button id="pinBtn" class="btn w-full mt-2">Entrar</button>
+  <!-- PIN -->
+  <div id="pinGate" style="position:fixed;inset:0;background:#0b1220;display:flex;align-items:center;justify-content:center;z-index:50;">
+    <div class="card p-6 w-[92%] max-w-sm text-center">
+      <img src="logo.png" alt="GRANTOP" class="mx-auto mb-4 h-10 opacity-80" />
+      <h3 class="font-semibold mb-2">Acesso restrito</h3>
+      <p class="text-sm opacity-70 mb-4">Informe o PIN para entrar.</p>
+      <input id="pinInput" type="password" placeholder="PIN" class="mb-3" />
+      <div class="text-xs text-rose-300 h-4 mb-2" id="pinErr"></div>
+      <button id="pinOk" class="btn w-full justify-center">Entrar</button>
     </div>
   </div>
 
-  <!-- Header -->
-  <header class="p-4 md:p-6 bg-slate-900 shadow flex items-center justify-between">
+  <!-- HEADER -->
+  <header class="p-4 md:p-6 bg-[#0f172a] shadow flex items-center justify-between border-b border-slate-700">
     <div class="flex items-center gap-3">
-      <img src="logo.png" alt="GRANTOP" class="h-9 w-auto"/>
-      <div class="leading-tight">
-        <h1 class="text-xl font-bold">GRANTOP</h1>
-        <div class="text-sky-300">• Finanças</div>
-      </div>
+      <img src="logo.png" alt="GRANTOP" class="h-8 w-auto" />
+      <h1 class="text-lg md:text-xl font-bold">GRANTOP • Finanças</h1>
+      <span id="conn" class="text-xs text-slate-300">Conectando…</span>
     </div>
     <div class="flex items-center gap-3">
-      <div class="flex items-center gap-2">
-        <label class="text-sm opacity-80">Mês vigente</label>
-        <input id="mesVigente" type="month" class="input">
-        <button id="btnAplicarMes" class="pill">Aplicar</button>
+      <div class="flex items-center gap-2 text-sm">
+        <label for="mesVigente" class="opacity-80">Mês vigente</label>
+        <input id="mesVigente" type="month" class="border rounded px-2 py-1" />
+        <button id="btnMesSalvar" class="btn">Aplicar</button>
       </div>
-      <button id="btnResumo" class="pill">Gerar Resumo (planilha)</button>
-      <button id="btnLogout" class="pill">Sair (PIN)</button>
+      <button id="btnResumo" class="btn">Gerar Resumo</button>
+      <a id="btnReload" href="#" class="text-sm link">Recarregar</a>
+      <a target="_blank" class="text-sm link" id="linkPlanilha">Abrir planilha</a>
+      <a href="#" id="btnLogout" class="text-sm link">Sair (PIN)</a>
     </div>
   </header>
 
-  <!-- KPIs -->
-  <section class="grid md:grid-cols-4 gap-3 p-4">
-    <div class="card"><div class="text-sm text-slate-400">Créditos (Total)</div><div id="kCredTot" class="text-xl font-semibold">R$ 0,00</div></div>
-    <div class="card"><div class="text-sm text-slate-400">Folha (Total)</div><div id="kFolhaTot" class="text-xl font-semibold">R$ 0,00</div></div>
-    <div class="card"><div class="text-sm text-slate-400">Fixas Pendentes</div><div id="kFixPend" class="text-xl font-semibold">R$ 0,00</div></div>
-    <div class="card"><div class="text-sm text-slate-400">Saldo Previsto</div><div id="kSaldoPrev" class="text-xl font-semibold">R$ 0,00</div></div>
-  </section>
-
-  <!-- Créditos -->
-  <main class="max-w-6xl mx-auto p-4">
-    <section class="card">
-      <h2 class="text-lg font-semibold mb-3">Créditos (Faturamento)</h2>
-
-      <form id="formCred" class="grid md:grid-cols-6 gap-3 items-end">
-        <input type="hidden" id="crId"/>
-        <div><label class="text-sm text-slate-400">Data</label><input id="crData" class="input" type="date" required></div>
-        <div class="md:col-span-2"><label class="text-sm text-slate-400">Cliente</label><input id="crCliente" class="input" required></div>
-        <div class="md:col-span-3"><label class="text-sm text-slate-400">Serviço / Local executado</label><input id="crServico" class="input" required></div>
-        <div><label class="text-sm text-slate-400">Valor (R$)</label><input id="crValor" class="input" inputmode="decimal" required></div>
-        <div><label class="text-sm text-slate-400">Pago?</label><select id="crPago" class="input"><option>Não</option><option>Sim</option></select></div>
-        <div><label class="text-sm text-slate-400">NF (opcional)</label><input id="crNF" class="input"></div>
-        <div class="md:col-span-2"><label class="text-sm text-slate-400">Link do boleto (opcional)</label><input id="crBoleto" class="input" placeholder="https://..."></div>
-        <div><label class="text-sm text-slate-400">Venc. do boleto</label><input id="crVenc" class="input" type="date"></div>
-        <div class="md:col-span-2"><label class="text-sm text-slate-400">Observações</label><input id="crObs" class="input"></div>
-        <div class="md:col-span-6"><button class="btn" type="submit">Salvar</button></div>
-      </form>
-
-      <div class="overflow-auto mt-6">
+  <!-- MAIN (apenas Créditos mostrado aqui simplificado para foco) -->
+  <main class="p-4">
+    <section id="tab-creditos" class="card p-4">
+      <h2 class="font-semibold mb-3">Créditos (Faturamento)</h2>
+      <div class="overflow-x-auto">
         <table>
-          <thead class="text-slate-400">
-          <tr>
-            <th>Data</th><th>Cliente</th><th>Serviço</th><th class="text-right">Valor</th><th>Pago?</th><th>Obs</th><th class="text-right">Ações</th>
-          </tr>
+          <thead>
+            <tr><th>Data</th><th>Cliente</th><th>Serviço</th><th>Valor</th><th>Pago?</th><th>Obs</th></tr>
           </thead>
           <tbody id="tbodyCred"></tbody>
         </table>
       </div>
     </section>
   </main>
+
+<script>
+const { API_URL, TOKEN, SS_ID } = window.GRANTOP_CFG || {};
+
+function jsonp(url){
+  return new Promise((resolve,reject)=>{
+    const cb='cb_'+Math.random().toString(36).slice(2);
+    window[cb]=data=>{ delete window[cb]; resolve(data); };
+    const s=document.createElement('script');
+    s.src=url+(url.includes('?')?'&':'?')+'token='+TOKEN+'&callback='+cb+'&_='+Date.now();
+    s.onerror=()=>reject(new Error("Network"));
+    document.body.appendChild(s);
+  });
+}
+const api={
+  listCred:()=>jsonp(API_URL+'?action=listreg'),
+  saveCred:(p)=>jsonp(API_URL+'?action=savereg&payload='+encodeURIComponent(JSON.stringify(p))),
+  setMonth:(m)=>jsonp(API_URL+'?action=setmonth&mes='+encodeURIComponent(m))
+};
+
+function moneyBR(v){ return Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2}); }
+function fmtDateBR(s){ return /^\d{4}-\d{2}-\d{2}$/.test(s)?s.split('-').reverse().join('/') : s; }
+
+let cacheCred=[];
+function renderCreditos(list){
+  cacheCred=list;
+  const tb=document.getElementById("tbodyCred");
+  tb.innerHTML="";
+  list.forEach(r=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td>${fmtDateBR(r.data)}</td>
+      <td>${r.cliente}</td>
+      <td>${r.servico}</td>
+      <td>R$ ${moneyBR(r.valor)}</td>
+      <td><span class="badge ${r.pago==='Sim'?'badge-green':'badge-red'} js-toggle-pago" data-id="${r._rowId}" data-status="${r.pago}">${r.pago}</span></td>
+      <td>${r.obs||''}</td>
+    `;
+    tb.appendChild(tr);
+  });
+}
+
+// Toggle pago com clique
+document.body.addEventListener("click",ev=>{
+  const t=ev.target;
+  if(t.classList.contains("js-toggle-pago")){
+    const id=t.dataset.id;
+    const atual=t.dataset.status==='Sim'?'Não':'Sim';
+    const row=cacheCred.find(x=>String(x._rowId)===id);
+    if(!row) return;
+    const payload={...row,pago:atual};
+    api.saveCred(payload).then(()=>loadCreditos());
+  }
+});
+
+function loadCreditos(){
+  api.listCred().then(r=>{
+    if(!r||!r.ok) return;
+    renderCreditos(r.result||[]);
+  });
+}
+
+// Troca de mês: repassa pendentes (feito no backend)
+document.getElementById("btnMesSalvar").addEventListener("click",()=>{
+  const v=document.getElementById("mesVigente").value;
+  if(!/^\d{4}-\d{2}$/.test(v)){ alert("Mês inválido"); return; }
+  api.setMonth(v).then(()=>loadCreditos());
+});
+
+loadCreditos();
+</script>
 </body>
 </html>
