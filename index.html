@@ -1,137 +1,222 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GRANTOP • Finanças V2.3</title>
-  <link rel="icon" href="logo.png" />
+  <link rel="icon" type="image/png" href="logo.png">
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- CONFIG -->
-  <script>
-    window.GRANTOP_CFG = {
-      API_URL: "https://script.google.com/macros/s/AKfycbyK02FLumiQoyMjVDvArN99hihh4fQ0M8husKp-aO6Pc-KSDfgI5T1dy4g8Vpqxw5YCUA/exec",
-      TOKEN  : "2400",
-      SS_ID  : "1SpUt8UqoQz_AhZEuotv_xYVTRi-0iUtZwMVZmTLztJk",
-      UI_PIN : "2400"
-    };
-  </script>
-
   <style>
-    :root { --bg:#0b1220; --panel:#0f172a; --border:#334155; --txt:#e2e8f0; }
-    body { background:var(--bg); color:var(--txt); }
-    .card{ border:1px solid #33415566; border-radius:12px; background:var(--panel); box-shadow:0 1px 2px rgba(0,0,0,.25) }
-    .btn{ display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--border); border-radius:8px; padding:.45rem .75rem; background:var(--panel) }
-    .btn:hover{ background:#0b1220 }
-    .tab{ border:1px solid var(--border); border-radius:9999px; padding:.4rem .8rem; }
-    .tab.active{ outline:2px solid #60a5fa; }
-    input, select{ background:#0b1220; border:1px solid var(--border); border-radius:8px; padding:.5rem .65rem; width:100% }
-    table { border-collapse: collapse; width:100% }
-    th, td { border:1px solid var(--border); padding:.45rem .5rem; font-size:.9rem }
-    thead { background:#0b1220 }
-    .pill{ border:1px solid var(--border); padding:.2rem .5rem; border-radius:999px; font-size:.75rem }
-    a.link { color:#93c5fd; text-decoration: underline; }
-    .badge{ padding:.15rem .5rem; border-radius:999px; font-size:.75rem; border:1px solid transparent }
-    .badge-red{ background:#7f1d1d; border-color:#ef4444; color:#fecaca }
-    .badge-green{ background:#064e3b; border-color:#34d399; color:#d1fae5 }
-    .kcard .big{ font-size:1.1rem; font-weight:700 }
-    .clickable{ cursor:pointer }
+    body { background-color: #0f172a; color: #e2e8f0; }
+    .card { background: #1e293b; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    .btn { padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-secondary { background: #475569; color: white; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { padding: 0.5rem; border-bottom: 1px solid #334155; }
+    th { text-align: left; }
+    .hidden { display: none; }
+    .badge { padding: 0.2rem 0.6rem; border-radius: 6px; font-size: 0.75rem; font-weight: bold; }
+    .badge-green { background: #16a34a; color: white; }
+    .badge-red { background: #dc2626; color: white; }
   </style>
 </head>
-<body>
-  <!-- PIN -->
-  <div id="pinGate" style="position:fixed;inset:0;background:#0b1220;display:flex;align-items:center;justify-content:center;z-index:50;">
-    <div class="card p-6 w-[92%] max-w-sm text-center">
-      <img src="logo.png" alt="GRANTOP" class="mx-auto mb-4 h-10 opacity-80" />
-      <h3 class="font-semibold mb-2">Acesso restrito</h3>
-      <p class="text-sm opacity-70 mb-4">Informe o PIN para entrar.</p>
-      <input id="pinInput" type="password" placeholder="PIN" class="mb-3" />
-      <div class="text-xs text-rose-300 h-4 mb-2" id="pinErr"></div>
-      <button id="pinOk" class="btn w-full justify-center">Entrar</button>
+<body class="min-h-screen flex flex-col">
+
+  <!-- TELA DE LOGIN (PIN) -->
+  <div id="loginScreen" class="flex-grow flex items-center justify-center">
+    <div class="card text-center w-80">
+      <img src="logo.png" alt="GRANTOP" class="h-12 mx-auto mb-4" />
+      <h2 class="text-lg font-bold mb-2">Acesso restrito</h2>
+      <p class="text-sm mb-4">Informe o PIN para entrar.</p>
+      <input id="pinInput" type="password" class="w-full p-2 rounded text-black mb-3" placeholder="PIN">
+      <button id="loginBtn" class="btn btn-primary w-full">Entrar</button>
     </div>
   </div>
 
-  <!-- HEADER -->
-  <header class="p-4 md:p-6 bg-[#0f172a] shadow flex items-center justify-between border-b border-slate-700">
-    <div class="flex items-center gap-3">
-      <img src="logo.png" alt="GRANTOP" class="h-8 w-auto" />
-      <h1 class="text-lg md:text-xl font-bold">GRANTOP • Finanças</h1>
-      <span id="conn" class="text-xs text-slate-300">Conectando…</span>
-    </div>
-    <div class="flex items-center gap-3">
-      <div class="flex items-center gap-2 text-sm">
-        <label for="mesVigente" class="opacity-80">Mês vigente</label>
-        <input id="mesVigente" type="month" class="border rounded px-2 py-1" />
-        <button id="btnMesSalvar" class="btn">Aplicar</button>
+  <!-- DASHBOARD -->
+  <div id="appScreen" class="hidden flex-grow flex flex-col">
+    <header class="flex justify-between items-center p-4 bg-slate-900 shadow">
+      <div class="flex items-center gap-2">
+        <img src="logo.png" alt="GRANTOP" class="h-8">
+        <h1 class="text-xl font-bold">GRANTOP • Finanças</h1>
+        <span id="status" class="ml-2 text-sm text-slate-400">Conectando...</span>
       </div>
-      <button id="btnResumo" class="btn">Gerar Resumo (planilha)</button>
-      <a id="btnReload" href="#" class="text-sm link">Recarregar</a>
-      <a target="_blank" class="text-sm link" id="linkPlanilha">Abrir planilha</a>
-      <a href="#" id="btnLogout" class="text-sm link">Sair (PIN)</a>
-    </div>
-  </header>
+      <button id="logoutBtn" class="btn btn-danger text-sm">Sair (PIN)</button>
+    </header>
 
-  <!-- Aqui você mantém o resto da estrutura do layout igual ao que já estava funcionando -->
-  <!-- Seções de indicadores, abas, formulários de funcionários, créditos, fixas etc. -->
+    <main class="p-4 flex-grow">
+      <!-- Indicadores -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="card text-center">
+          <h3 class="text-sm text-slate-400">Créditos (Total)</h3>
+          <p id="cardCreditos" class="text-lg font-bold">R$ 0,00</p>
+        </div>
+        <div class="card text-center">
+          <h3 class="text-sm text-slate-400">Folha (Total)</h3>
+          <p id="cardFolha" class="text-lg font-bold">R$ 0,00</p>
+        </div>
+        <div class="card text-center">
+          <h3 class="text-sm text-slate-400">Fixas Pendentes</h3>
+          <p id="cardFixas" class="text-lg font-bold">R$ 0,00</p>
+        </div>
+        <div class="card text-center">
+          <h3 class="text-sm text-slate-400">Saldo Previsto</h3>
+          <p id="cardSaldo" class="text-lg font-bold">R$ 0,00</p>
+        </div>
+      </div>
 
-  <!-- JS INLINE para evitar erro 404 -->
+      <!-- Aba Créditos -->
+      <div id="abaCreditos" class="card">
+        <h2 class="text-lg font-bold mb-2">Créditos (Faturamento)</h2>
+
+        <!-- Formulário -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
+          <input id="data" type="date" class="p-2 rounded text-black" placeholder="Data">
+          <input id="cliente" type="text" class="p-2 rounded text-black" placeholder="Cliente">
+          <input id="servico" type="text" class="p-2 rounded text-black" placeholder="Serviço / Local">
+          <input id="valor" type="number" class="p-2 rounded text-black" placeholder="Valor (R$)">
+          <select id="pago" class="p-2 rounded text-black">
+            <option value="Não">Não</option>
+            <option value="Sim">Sim</option>
+          </select>
+          <input id="obs" type="text" class="p-2 rounded text-black" placeholder="Observações">
+        </div>
+
+        <div class="flex gap-2 mb-4">
+          <button id="salvarBtn" class="btn btn-primary">Salvar</button>
+          <button id="limparBtn" class="btn btn-secondary">Limpar</button>
+        </div>
+
+        <!-- Tabela -->
+        <table>
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Cliente</th>
+              <th>Serviço</th>
+              <th>Valor</th>
+              <th>Pago?</th>
+              <th>Obs</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tabelaCreditos"></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <!-- SCRIPT EMBUTIDO -->
   <script>
-    // === Tudo o que estava no financas.js agora fica aqui ===
-    // Inclui PIN, jsonp, api, connectAndLoad, renderizadores etc.
-    // (Usei exatamente o mesmo script da versão que estava funcionando, apenas removi a chamada externa)
+    const API_URL = "https://script.google.com/macros/s/AKfycbxKV_BlnOQgW_hwZwM150o-MjZWfpP5GX-ZSaetQJXwSVnUucNFY9AHGAsM-fVrpitm/exec";
+    const TOKEN = "2400";
 
-    // Exemplo reduzido:
-    (function(){
-      const { API_URL, TOKEN, SS_ID, UI_PIN } = window.GRANTOP_CFG || {};
-      const connEl = document.getElementById("conn");
-      function setConn(t,cls){ connEl.textContent=t; connEl.className='text-xs '+(cls||'text-slate-300'); }
+    const loginScreen = document.getElementById("loginScreen");
+    const appScreen = document.getElementById("appScreen");
+    const loginBtn = document.getElementById("loginBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const pinInput = document.getElementById("pinInput");
 
-      function jsonp(url){
-        return new Promise((resolve,reject)=>{
-          const cb='__cb_'+Math.random().toString(36).slice(2);
-          const s=document.createElement('script'); let done=false;
-          window[cb]=data=>{ done=true; delete window[cb]; s.remove(); resolve(data); };
-          s.src=url+(url.includes('?')?'&':'?')+'token='+TOKEN+'&callback='+cb+'&_='+Date.now();
-          s.onerror=()=>{reject(new Error('Erro de rede'));};
-          document.body.appendChild(s);
-        });
+    loginBtn.onclick = () => {
+      if (pinInput.value === TOKEN) {
+        loginScreen.classList.add("hidden");
+        appScreen.classList.remove("hidden");
+        carregarCreditos();
+      } else {
+        alert("PIN inválido");
       }
+    };
 
-      const api={
-        ping:()=>jsonp(API_URL+'?action=ping'),
-        config:()=>jsonp(API_URL+'?action=config'),
-        listCred:()=>jsonp(API_URL+'?action=listreg'),
-        saveCred:(p)=>jsonp(API_URL+'?action=savereg&payload='+encodeURIComponent(JSON.stringify(p))),
-        delCred:(id)=>jsonp(API_URL+'?action=delreg&id='+id),
-        resumo:()=>jsonp(API_URL+'?action=resumo')
-      };
+    logoutBtn.onclick = () => {
+      appScreen.classList.add("hidden");
+      loginScreen.classList.remove("hidden");
+      pinInput.value = "";
+    };
 
-      function connectAndLoad(){
-        setConn('Conectando…');
-        Promise.all([api.ping(), api.config(), api.listCred()])
-          .then(all=>{
-            setConn('Conectado','text-green-300');
-            console.log('Config:',all[1]);
-            console.log('Créditos:',all[2]);
-          })
-          .catch(()=>setConn('Erro','text-rose-300'));
-      }
-
-      // PIN
-      (function pinInit(){
-        const gate=document.getElementById('pinGate');
-        const input=document.getElementById('pinInput');
-        const btn=document.getElementById('pinOk');
-        const err=document.getElementById('pinErr');
-        function tryOpen(){
-          if(input.value===UI_PIN){ localStorage.setItem('grantop_pin_ok','1'); gate.style.display='none'; connectAndLoad(); }
-          else err.textContent='PIN incorreto';
+    async function carregarCreditos() {
+      document.getElementById("status").innerText = "Carregando...";
+      try {
+        const res = await fetch(`${API_URL}?action=listreg&token=${TOKEN}`);
+        const json = await res.json();
+        if (json.ok) {
+          renderCreditos(json.result);
+          document.getElementById("status").innerText = "Conectado";
+        } else {
+          document.getElementById("status").innerText = "Erro ao carregar";
         }
-        btn.addEventListener('click',tryOpen);
-        input.addEventListener('keydown',e=>{if(e.key==='Enter')tryOpen();});
-        if(localStorage.getItem('grantop_pin_ok')==='1'){ gate.style.display='none'; connectAndLoad(); }
-      })();
-    })();
+      } catch (err) {
+        console.error(err);
+        document.getElementById("status").innerText = "Falha de conexão";
+      }
+    }
+
+    function renderCreditos(lista) {
+      const tbody = document.getElementById("tabelaCreditos");
+      tbody.innerHTML = "";
+      lista.forEach(reg => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${reg.data}</td>
+          <td>${reg.cliente}</td>
+          <td>${reg.servico}</td>
+          <td>R$ ${reg.valor.toFixed(2)}</td>
+          <td>
+            <span class="badge ${reg.pago === "Sim" ? "badge-green" : "badge-red"}">
+              ${reg.pago}
+            </span>
+          </td>
+          <td>${reg.obs}</td>
+          <td>
+            <button class="btn btn-secondary" onclick="editarCredito(${reg._rowId})">Editar</button>
+            <button class="btn btn-danger" onclick="excluirCredito(${reg._rowId})">Excluir</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function excluirCredito(id) {
+      if (!confirm("Excluir crédito?")) return;
+      const res = await fetch(`${API_URL}?action=delreg&token=${TOKEN}&id=${id}`);
+      const json = await res.json();
+      if (json.ok) carregarCreditos();
+      else alert("Erro ao excluir crédito");
+    }
+
+    // salvar
+    document.getElementById("salvarBtn").onclick = async () => {
+      const payload = {
+        data: document.getElementById("data").value,
+        cliente: document.getElementById("cliente").value,
+        servico: document.getElementById("servico").value,
+        valor: parseFloat(document.getElementById("valor").value || 0),
+        pago: document.getElementById("pago").value,
+        obs: document.getElementById("obs").value
+      };
+      const res = await fetch(`${API_URL}?action=savereg&token=${TOKEN}&payload=${encodeURIComponent(JSON.stringify(payload))}`);
+      const json = await res.json();
+      if (json.ok) {
+        carregarCreditos();
+        document.getElementById("data").value = "";
+        document.getElementById("cliente").value = "";
+        document.getElementById("servico").value = "";
+        document.getElementById("valor").value = "";
+        document.getElementById("obs").value = "";
+      } else {
+        alert("Erro ao salvar crédito");
+      }
+    };
+
+    // limpar
+    document.getElementById("limparBtn").onclick = () => {
+      document.getElementById("data").value = "";
+      document.getElementById("cliente").value = "";
+      document.getElementById("servico").value = "";
+      document.getElementById("valor").value = "";
+      document.getElementById("obs").value = "";
+    };
   </script>
 </body>
 </html>
