@@ -21,7 +21,7 @@
     :root { --bg:#0b1220; --panel:#0f172a; --border:#334155; --txt:#e2e8f0; }
     body { background:var(--bg); color:var(--txt); }
     .card{ border:1px solid #33415566; border-radius:12px; background:var(--panel); box-shadow:0 1px 2px rgba(0,0,0,.25) }
-    .btn{ display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--border); border-radius:8px; padding:.45rem .75rem; background:var(--panel); cursor:pointer }
+    .btn{ display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--border); border-radius:8px; padding:.45rem .75rem; background:var(--panel) }
     .btn:hover{ background:#0b1220 }
     .tab{ border:1px solid var(--border); border-radius:9999px; padding:.4rem .8rem; }
     .tab.active{ outline:2px solid #60a5fa; }
@@ -359,7 +359,7 @@
       resumo:   ()=>jsonp(API_URL+'?action=resumo')
     };
 
-    // ====== Carregamento / Conexão (definido ANTES do PIN) ======
+    // ====== Carregamento / Conexão (definido ANTES do PIN)
     const connEl = document.getElementById('conn');
     const setConn = (t,cls)=>{ connEl.textContent=t; connEl.className='text-xs '+(cls||'text-slate-300'); };
 
@@ -377,6 +377,63 @@
       return api.setMonth(yyyymm).then(()=>{});
     }
 
+    // ==== Helpers adicionais (carryover e datas)
+    function yyyymmFromDate(d){
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      return `${y}-${m}`;
+    }
+    function firstDayOfYYYYMM(yyyymm){
+      const [y,m]=yyyymm.split('-').map(Number);
+      return `${y}-${String(m).padStart(2,'0')}-01`;
+    }
+    function creditSig(c){
+      const ex = (c.obs || c.observacoes || '');
+      const mNF = ex.match(/NF:([^|]+)/i);
+      const nf  = mNF ? mNF[1].trim() : '';
+      const cliente = (c.cliente||'').trim();
+      const servico = (c.servico||c.endereco||'').trim();
+      const valor   = (Number(c.valor||0)).toFixed(2);
+      return `${cliente}|${servico}|${valor}|${nf}`;
+    }
+    async function carryoverUnpaidCredits(currentYYYYMM, newYYYYMM){
+      try{
+        // garantir que estamos no mês atual e listar
+        await api.setMonth(currentYYYYMM);
+        const curResp = await api.listCred();
+        const curList = (curResp && curResp.ok && curResp.result) ? curResp.result : [];
+        const pendentes = curList.filter(x => String(x.pago||'Não') !== 'Sim');
+        if(pendentes.length===0){ await api.setMonth(newYYYYMM); return; }
+
+        // ir para mês novo e deduplicar
+        await api.setMonth(newYYYYMM);
+        const newResp = await api.listCred();
+        const newList = (newResp && newResp.ok && newResp.result) ? newResp.result : [];
+        const newSigs = new Set(newList.map(creditSig));
+
+        const dtNova = firstDayOfYYYYMM(newYYYYMM);
+        const saves=[];
+        for(const it of pendentes){
+          const sig = creditSig(it);
+          if(newSigs.has(sig)) continue;
+
+          const obsOrig = String(it.obs || it.observacoes || '');
+          const payload = {
+            data: dtNova,          // se quiser vazio, troque para ''
+            cliente: it.cliente||'',
+            servico: it.servico || it.endereco || '',
+            valor: Number(it.valor||0),
+            pago: 'Não',
+            obs: obsOrig
+          };
+          saves.push(api.saveCred(payload));
+        }
+        if(saves.length) await Promise.all(saves);
+      }catch(e){
+        console.error('Carryover pendentes falhou', e);
+      }
+    }
+
     function loadFuncionarios(){ api.listFunc().then(r=>{ if(!r||!r.ok){showError('Listar funcionários falhou.');return;} hideError(); renderFuncionarios(r.result||[]); }).catch(e=>showError(e.message)); }
     function loadCreditos(){ api.listCred().then(r=>{ if(!r||!r.ok){showError('Listar créditos falhou.');return;} hideError(); renderCreditos(r.result||[]); }).catch(e=>showError(e.message)); }
     function loadFixas(){ api.listFix().then(r=>{ if(!r||!r.ok){showError('Listar fixas falhou.');return;} hideError(); renderFixas(r.result||[]); }).catch(e=>showError(e.message)); }
@@ -385,23 +442,46 @@
     function loadImpMes(){ api.listImpMes().then(r=>{ if(!r||!r.ok){showError('Listar imposto do mês falhou.');return;} hideError(); renderImpMes(r.result||[]); }).catch(e=>showError(e.message)); }
     function loadClientes(){ api.listCli().then(r=>{ if(!r||!r.ok){showError('Listar clientes falhou.');return;} hideError(); renderClientes(r.result||[]); }).catch(e=>showError(e.message)); }
 
-    function connectAndLoad(){
+    async function connectAndLoad(){
       setConn('Conectando…');
-      Promise.all([api.ping(), api.config(), api.listFunc(), api.listCred(), api.listFix(), api.listContas(), api.listImpParc(), api.listImpMes(), api.listCli()])
-        .then(all=>{
-          setConn('Conectado','text-green-300');
-          const cfg = all[1]?.result || {};
-          if(cfg.mesAtualYYYYMM) mesInput.value = cfg.mesAtualYYYYMM;
-          renderFuncionarios(all[2]?.result||[]);
-          renderCreditos(all[3]?.result||[]);
-          renderFixas(all[4]?.result||[]);
-          renderContas(all[5]?.result||[]);
-          renderImpParc(all[6]?.result||[]);
-          renderImpMes(all[7]?.result||[]);
-          renderClientes(all[8]?.result||[]);
-          recalcTopCards();
-        })
-        .catch((err)=>{ console.error(err); setConn('Erro','text-rose-300'); showError('Falha ao conectar.'); });
+      try{
+        const all = await Promise.all([api.ping(), api.config()]);
+        const cfg = all[1]?.result || {};
+        if(cfg.mesAtualYYYYMM) mesInput.value = cfg.mesAtualYYYYMM;
+
+        // ===== AUTO-CARRYOVER ao virar o mês do calendário (1x)
+        const todayYYYYMM = yyyymmFromDate(new Date());
+        const cfgYYYYMM = cfg.mesAtualYYYYMM || todayYYYYMM;
+        const alreadyKey = 'carryover_done_TO_'+todayYYYYMM;
+        if(todayYYYYMM > cfgYYYYMM && !localStorage.getItem(alreadyKey)){
+          await carryoverUnpaidCredits(cfgYYYYMM, todayYYYYMM);
+          localStorage.setItem(alreadyKey, '1');
+        }
+
+        // Depois do possível carryover, recarrega config e dados
+        const cfg2 = await api.config();
+        const cm = cfg2?.result?.mesAtualYYYYMM || mesInput.value || todayYYYYMM;
+        mesInput.value = cm;
+
+        const lists = await Promise.all([
+          api.listFunc(), api.listCred(), api.listFix(), api.listContas(),
+          api.listImpParc(), api.listImpMes(), api.listCli()
+        ]);
+
+        setConn('Conectado','text-green-300');
+        renderFuncionarios(lists[0]?.result||[]);
+        renderCreditos   (lists[1]?.result||[]);
+        renderFixas      (lists[2]?.result||[]);
+        renderContas     (lists[3]?.result||[]);
+        renderImpParc    (lists[4]?.result||[]);
+        renderImpMes     (lists[5]?.result||[]);
+        renderClientes   (lists[6]?.result||[]);
+        recalcTopCards();
+      }catch(err){
+        console.error(err);
+        setConn('Erro','text-rose-300');
+        showError('Falha ao conectar.');
+      }
     }
 
     // ===== Tabs
@@ -415,16 +495,30 @@
       if(t==='resumo') renderResumoCards();
     }));
 
-    // ===== MÊS VIGENTE
-    document.getElementById('btnMesSalvar').addEventListener('click', ()=>{
+    // ===== MÊS VIGENTE (Aplicar) — carryover quando avança
+    document.getElementById('btnMesSalvar').addEventListener('click', async ()=>{
       const v = mesInput.value;
-      if(!/^\d{4}-\d{2}$/.test(v)){ alert('Selecione um mês válido.'); return; }
-      api.setMonth(v).then(r=>{
-        if(!r||!r.ok){ alert('Falha ao definir mês.'); return; }
-        const info = r.result || r;
+      if(!/^\d{4}-\d{2}$/.test(v)){
+        alert('Selecione um mês válido.');
+        return;
+      }
+      try{
+        const cfgResp = await api.config();
+        const cur = (cfgResp && cfgResp.ok && cfgResp.result && cfgResp.result.mesAtualYYYYMM) ? cfgResp.result.mesAtualYYYYMM : mesInput.value;
+        const isForward = v > cur;
+        if(isForward){
+          await carryoverUnpaidCredits(cur, v);
+        }else{
+          await api.setMonth(v);
+        }
+
+        const c2 = await api.config();
+        const info = (c2 && c2.ok && c2.result) ? c2.result : {};
         document.getElementById('sumMsg').textContent = 'Resumo atualizado para '+ (info.mesAtualLabel || '');
         connectAndLoad();
-      }).catch(ex=>showError(ex.message));
+      }catch(ex){
+        showError(ex.message || 'Falha ao definir mês.');
+      }
     });
 
     // ===== Funcionários
@@ -533,6 +627,7 @@
         }).catch(ex=>showError(ex.message));
     });
     document.getElementById('crClear').addEventListener('click', ()=>{ formCred.reset(); crId.value=''; });
+
     document.body.addEventListener('click', ev=>{
       const t=ev.target;
 
@@ -558,7 +653,6 @@
         const id=t.dataset.id;
         const it=cacheCred.find(x=>String(x._rowId)===String(id)); if(!it) return;
         const novoPago = String(it.pago||'Não')==='Sim' ? 'Não' : 'Sim';
-        // Reconstrói payload completo para não perder dados
         const ex=parseObs(it.obs||it.observacoes);
         const obsLimpa = String(ex.resto||'').replace(/(?:NF:[^|]+|boleto:[^|]+|venc:[^|]+)\s*\|?\s*/gi,'').trim();
         const obs = extrasToObs(ex.nf, ex.boleto, ex.venc, obsLimpa);
@@ -807,7 +901,7 @@
       e.preventDefault(); connectAndLoad();
     });
 
-    // ===== PIN / Safe Init (por último — mas com tudo acima já definido)
+    // ===== PIN / Safe Init
     (function pinInit(){
       const wantPIN = (window.GRANTOP_CFG && window.GRANTOP_CFG.UI_PIN);
       if(!wantPIN){ document.getElementById('pinGate').style.display='none'; safeInit(); return; }
@@ -817,7 +911,6 @@
       const input=document.getElementById('pinInput');
       const btn=document.getElementById('pinOk');
       const errEl=document.getElementById('pinErr');
-
       function tryOpen(){
         const ok = String(input.value||'')===String(window.GRANTOP_CFG.UI_PIN);
         if(ok){ localStorage.setItem('grantop_pin_ok','1'); gate.style.display='none'; safeInit(); }
