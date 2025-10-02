@@ -21,7 +21,7 @@
     :root { --bg:#0b1220; --panel:#0f172a; --border:#334155; --txt:#e2e8f0; }
     body { background:var(--bg); color:var(--txt); }
     .card{ border:1px solid #33415566; border-radius:12px; background:var(--panel); box-shadow:0 1px 2px rgba(0,0,0,.25) }
-    .btn{ display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--border); border-radius:8px; padding:.45rem .75rem; background:var(--panel) }
+    .btn{ display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--border); border-radius:8px; padding:.45rem .75rem; background:var(--panel); cursor:pointer }
     .btn:hover{ background:#0b1220 }
     .tab{ border:1px solid var(--border); border-radius:9999px; padding:.4rem .8rem; }
     .tab.active{ outline:2px solid #60a5fa; }
@@ -307,14 +307,6 @@
     function showError(msg){ const el=err; el.textContent=String(msg||'Erro'); el.classList.remove('hidden'); }
     function hideError(){ err.classList.add('hidden'); err.textContent=''; }
 
-    // Desembrulha qualquer formato comum de retorno
-    function unwrapList(res){
-      if(!res) return [];
-      if(Array.isArray(res)) return res;
-      const r = res.result || res.data || res.items || res.rows || [];
-      return Array.isArray(r)? r : [];
-    }
-
     // JSONP
     function jsonp(url, timeout){
       timeout = timeout || 15000;
@@ -385,28 +377,28 @@
       return api.setMonth(yyyymm).then(()=>{});
     }
 
-    function loadFuncionarios(){ api.listFunc().then(r=>{ if(!r||!r.ok){showError('Listar funcionários falhou.');return;} hideError(); renderFuncionarios(unwrapList(r)); }).catch(e=>showError(e.message)); }
-    function loadCreditos(){ api.listCred().then(r=>{ if(!r||!r.ok){showError('Listar créditos falhou.');return;} hideError(); renderCreditos(unwrapList(r)); }).catch(e=>showError(e.message)); }
-    function loadFixas(){ api.listFix().then(r=>{ if(!r||!r.ok){showError('Listar fixas falhou.');return;} hideError(); renderFixas(unwrapList(r)); }).catch(e=>showError(e.message)); }
-    function loadContas(){ api.listContas().then(r=>{ if(!r||!r.ok){showError('Listar contas falhou.');return;} hideError(); renderContas(unwrapList(r)); }).catch(e=>showError(e.message)); }
-    function loadImpParc(){ api.listImpParc().then(r=>{ if(!r||!r.ok){showError('Listar impostos parcelados falhou.');return;} hideError(); renderImpParc(unwrapList(r)); }).catch(e=>showError(e.message)); }
-    function loadImpMes(){ api.listImpMes().then(r=>{ if(!r||!r.ok){showError('Listar imposto do mês falhou.');return;} hideError(); renderImpMes(unwrapList(r)); }).catch(e=>showError(e.message)); }
-    function loadClientes(){ api.listCli().then(r=>{ if(!r||!r.ok){showError('Listar clientes falhou.');return;} hideError(); renderClientes(unwrapList(r)); }).catch(e=>showError(e.message)); }
+    function loadFuncionarios(){ api.listFunc().then(r=>{ if(!r||!r.ok){showError('Listar funcionários falhou.');return;} hideError(); renderFuncionarios(r.result||[]); }).catch(e=>showError(e.message)); }
+    function loadCreditos(){ api.listCred().then(r=>{ if(!r||!r.ok){showError('Listar créditos falhou.');return;} hideError(); renderCreditos(r.result||[]); }).catch(e=>showError(e.message)); }
+    function loadFixas(){ api.listFix().then(r=>{ if(!r||!r.ok){showError('Listar fixas falhou.');return;} hideError(); renderFixas(r.result||[]); }).catch(e=>showError(e.message)); }
+    function loadContas(){ api.listContas().then(r=>{ if(!r||!r.ok){showError('Listar contas falhou.');return;} hideError(); renderContas(r.result||[]); }).catch(e=>showError(e.message)); }
+    function loadImpParc(){ api.listImpParc().then(r=>{ if(!r||!r.ok){showError('Listar impostos parcelados falhou.');return;} hideError(); renderImpParc(r.result||[]); }).catch(e=>showError(e.message)); }
+    function loadImpMes(){ api.listImpMes().then(r=>{ if(!r||!r.ok){showError('Listar imposto do mês falhou.');return;} hideError(); renderImpMes(r.result||[]); }).catch(e=>showError(e.message)); }
+    function loadClientes(){ api.listCli().then(r=>{ if(!r||!r.ok){showError('Listar clientes falhou.');return;} hideError(); renderClientes(r.result||[]); }).catch(e=>showError(e.message)); }
 
     function connectAndLoad(){
       setConn('Conectando…');
       Promise.all([api.ping(), api.config(), api.listFunc(), api.listCred(), api.listFix(), api.listContas(), api.listImpParc(), api.listImpMes(), api.listCli()])
         .then(all=>{
           setConn('Conectado','text-green-300');
-          const cfg = all[1]?.result || all[1] || {};
+          const cfg = all[1]?.result || {};
           if(cfg.mesAtualYYYYMM) mesInput.value = cfg.mesAtualYYYYMM;
-          renderFuncionarios(unwrapList(all[2]));
-          renderCreditos(unwrapList(all[3]));
-          renderFixas(unwrapList(all[4]));
-          renderContas(unwrapList(all[5]));
-          renderImpParc(unwrapList(all[6]));
-          renderImpMes(unwrapList(all[7]));
-          renderClientes(unwrapList(all[8]));
+          renderFuncionarios(all[2]?.result||[]);
+          renderCreditos(all[3]?.result||[]);
+          renderFixas(all[4]?.result||[]);
+          renderContas(all[5]?.result||[]);
+          renderImpParc(all[6]?.result||[]);
+          renderImpMes(all[7]?.result||[]);
+          renderClientes(all[8]?.result||[]);
           recalcTopCards();
         })
         .catch((err)=>{ console.error(err); setConn('Erro','text-rose-300'); showError('Falha ao conectar.'); });
@@ -513,12 +505,6 @@
       return `<span class="badge badge-red clickable js-toggle-pago" data-id="${id}">Não</span>`;
     }
     function renderCreditos(list){
-      if(!Array.isArray(list)){
-        const obj=list||{};
-        list = obj.result || obj.rows || obj.data || [];
-      }
-      if(!Array.isArray(list)) list = [];
-
       cacheCred=list.slice();
       const tb=document.getElementById('tbodyCred'); tb.innerHTML='';
       document.getElementById('crEmpty').classList.toggle('hidden', list.length>0);
@@ -572,9 +558,11 @@
         const id=t.dataset.id;
         const it=cacheCred.find(x=>String(x._rowId)===String(id)); if(!it) return;
         const novoPago = String(it.pago||'Não')==='Sim' ? 'Não' : 'Sim';
+        // Reconstrói payload completo para não perder dados
         const ex=parseObs(it.obs||it.observacoes);
         const obsLimpa = String(ex.resto||'').replace(/(?:NF:[^|]+|boleto:[^|]+|venc:[^|]+)\s*\|?\s*/gi,'').trim();
         const obs = extrasToObs(ex.nf, ex.boleto, ex.venc, obsLimpa);
+
         const payload = {
           id: it._rowId,
           data: /^\d{4}-\d{2}-\d{2}$/.test(it.data)? it.data : '',
@@ -584,6 +572,7 @@
           pago: novoPago,
           obs
         };
+
         api.saveCred(payload).then(r=>{
           if(!r||!r.ok){ alert('Falha ao salvar crédito.'); return; }
           loadCreditos();
@@ -702,4 +691,149 @@
       const t=ev.target;
       if(t.classList.contains('js-edit-ip')){
         const it=cacheImpParc.find(x=>String(x.id)===String(t.dataset.id)); if(!it) return;
-        ipId.value=it.id; ipDesc.value=it.descricao||''; ipTributo.value=it.tributo||''; ipParcela.value=it.parcela||''; ipVenc.value=/^\d{4}-\d{2}-\d{2}$/.test(it.vencimento)?it.v
+        ipId.value=it.id; ipDesc.value=it.descricao||''; ipTributo.value=it.tributo||''; ipParcela.value=it.parcela||'';
+        ipVenc.value=/^\d{4}-\d{2}-\d{2}$/.test(it.vencimento)?it.vencimento:''; ipValor.value=String(it.valor).replace('.',','); ipPago.value=it.pago||'Não'; ipObs.value=it.obs||'';
+        window.scrollTo({top:0, behavior:'smooth'});
+      }
+      if(t.classList.contains('js-del-ip')){
+        if(!confirm('Excluir imposto parcelado?')) return;
+        api.delImpParc(t.dataset.id).then(r=>{ if(!r||!r.ok){alert('Falha ao excluir.');return;} loadImpParc(); }).catch(ex=>showError(ex.message));
+      }
+    });
+
+    // ===== Imposto do mês
+    function renderImpMes(list){
+      cacheImpMes=list.slice();
+      const tb=tbodyImpMes; tb.innerHTML='';
+      imEmpty.classList.toggle('hidden', list.length>0);
+      list.forEach(r=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${r.mesAno||''}</td><td>${r.tributo||''}</td><td>${fmtDateBR(r.vencimento)}</td>
+          <td>R$ ${moneyBR(r.valor)}</td><td>${r.pago||''}</td><td>${r.obs||''}</td><td>${fmtDateBR(r.atualizadoEm)}</td>
+          <td><button class="btn js-edit-im" data-id="${r._rowId||r.id}">Editar</button> <button class="btn js-del-im" data-id="${r._rowId||r.id}">Excluir</button></td>`;
+        tb.appendChild(tr);
+      });
+    }
+    formImpMes.addEventListener('submit', e=>{
+      e.preventDefault();
+      const p={ id:imId.value||undefined, mesAno:imMes.value, tributo:imTributo.value.trim(), vencimento:imVenc.value, valor:toNumberBR(imValor.value), pago:imPago.value, obs:imObs.value.trim() };
+      const yyyymm = imMes.value || mesInput.value;
+      ensureMonth(yyyymm)
+        .then(()=> api.saveImpMes(p))
+        .then(r=>{ if(!r||!r.ok){alert('Falha ao salvar.');return;} e.target.reset(); imId.value=''; connectAndLoad(); })
+        .catch(ex=>showError(ex.message));
+    });
+    imClear.addEventListener('click', ()=>{ formImpMes.reset(); imId.value=''; });
+    document.body.addEventListener('click', ev=>{
+      const t=ev.target;
+      if(t.classList.contains('js-edit-im')){
+        const it=cacheImpMes.find(x=>String(x._rowId||x.id)===String(t.dataset.id)); if(!it) return;
+        imId.value=it._rowId||it.id; imMes.value=(it.mesAno||it.mes||''); imTributo.value=it.tributo||''; imVenc.value=/^\d{4}-\d{2}-\d{2}$/.test(it.vencimento)?it.vencimento:''; imValor.value=String(it.valor).replace('.',','); imPago.value=it.pago||'Não'; imObs.value=it.obs||'';
+        window.scrollTo({top:0, behavior:'smooth'});
+      }
+      if(t.classList.contains('js-del-im')){
+        if(!confirm('Excluir imposto do mês?')) return;
+        api.delImpMes(t.dataset.id).then(r=>{ if(!r||!r.ok){alert('Falha ao excluir.');return;} loadImpMes(); }).catch(ex=>showError(ex.message));
+      }
+    });
+
+    // ===== Clientes
+    function renderClientes(list){
+      cacheCli = list.slice();
+      const tb=tbodyCli; tb.innerHTML='';
+      clEmpty.classList.toggle('hidden', list.length>0);
+      list.forEach(r=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${r.id}</td><td>${r.nome||''}</td><td>${r.telefone||''}</td><td>${r.email||''}</td><td>${r.empresa||''}</td><td>${fmtDateBR(r.atualizadoEm)}</td>
+          <td><button class="btn js-edit-cl" data-id="${r.id}">Editar</button> <button class="btn js-del-cl" data-id="${r.id}">Excluir</button></td>`;
+        tb.appendChild(tr);
+      });
+    }
+    formCli.addEventListener('submit', e=>{
+      e.preventDefault();
+      const p={ id:clId.value||undefined, nome:clNome.value.trim(), telefone:clTel.value.trim(), email:clEmail.value.trim(), empresa:clEmpresa.value.trim() };
+      api.saveCli(p).then(r=>{ if(!r||!r.ok){ alert('Falha ao salvar.'); return; } e.target.reset(); clId.value=''; loadClientes(); }).catch(ex=>showError(ex.message));
+    });
+    clClear.addEventListener('click', ()=>{ formCli.reset(); clId.value=''; });
+    document.body.addEventListener('click', ev=>{
+      const t=ev.target;
+      if(t.classList.contains('js-edit-cl')){
+        const it=cacheCli.find(x=>String(x.id)===String(t.dataset.id)); if(!it) return;
+        clId.value=it.id; clNome.value=it.nome||''; clTel.value=it.telefone||''; clEmail.value=it.email||''; clEmpresa.value=it.empresa||'';
+        window.scrollTo({top:0, behavior:'smooth'});
+      }
+      if(t.classList.contains('js-del-cl')){
+        const id=t.dataset.id; if(!confirm('Excluir cliente '+id+'?')) return;
+        api.delCli(id).then(r=>{ if(!r||!r.ok){ alert('Falha ao excluir.'); return; } loadClientes(); }).catch(ex=>showError(ex.message));
+      }
+    });
+
+    // ===== Resumo (cards)
+    function renderResumoCards(){
+      const totF = cacheFunc.reduce((s,x)=>s+Number(x.total||0),0);
+      const totPag = cacheFixas.reduce((s,x)=>s+(String(x.status)==='Pago'?Number(x.valor||0):0),0);
+      const totPend= cacheFixas.reduce((s,x)=>s+(String(x.status)!=='Pago'?Number(x.valor||0):0),0);
+      const credTot = cacheCred.reduce((s,x)=>s+Number(x.valor||0),0);
+      const saldoPrev = credTot - (totF + totPend);
+      kFuncQtd.textContent=String(cacheFunc.length);
+      kFuncTot.textContent='R$ '+moneyBR(totF);
+      kFixasPagas.textContent='R$ '+moneyBR(totPag);
+      kFixasPend.textContent='R$ '+moneyBR(totPend);
+      kSaldoPrev.textContent='R$ '+moneyBR(saldoPrev);
+    }
+
+    // Indicadores do topo
+    function recalcTopCards(){
+      const totF = cacheFunc.reduce((s,x)=>s+Number(x.total||0),0);
+      const fixPend = cacheFixas.reduce((s,x)=>s+(String(x.status)!=='Pago'?Number(x.valor||0):0),0);
+      const credTot = cacheCred.reduce((s,x)=>s+Number(x.valor||0),0);
+      const aReceber = cacheCred.reduce((s,x)=>s+(String(x.pago||'Não')==='Sim'?0:Number(x.valor||0)),0);
+      const recebido = cacheCred.reduce((s,x)=>s+(String(x.pago||'Não')==='Sim'?Number(x.valor||0):0),0);
+      const saldoPrev = credTot - (totF + fixPend);
+
+      kCredTot.textContent = 'R$ '+moneyBR(credTot);
+      kFolhaTot.textContent = 'R$ '+moneyBR(totF);
+      kFixPend.textContent  = 'R$ '+moneyBR(fixPend);
+      kSaldoPrevTop.textContent = 'R$ '+moneyBR(saldoPrev);
+      kAReceber.textContent = 'R$ '+moneyBR(aReceber);
+      kRecebido.textContent = 'R$ '+moneyBR(recebido);
+    }
+
+    // Resumo planilha
+    btnResumo.addEventListener('click', ()=>{ api.resumo().then(r=>{ if(!r||!r.ok){ alert('Falha ao atualizar resumo.'); return; } sumMsg.textContent='Resumo atualizado na planilha.'; }); });
+
+    // Recarregar
+    btnReload.addEventListener('click', e=>{
+      e.preventDefault(); connectAndLoad();
+    });
+
+    // ===== PIN / Safe Init (por último — mas com tudo acima já definido)
+    (function pinInit(){
+      const wantPIN = (window.GRANTOP_CFG && window.GRANTOP_CFG.UI_PIN);
+      if(!wantPIN){ document.getElementById('pinGate').style.display='none'; safeInit(); return; }
+      if(localStorage.getItem('grantop_pin_ok')==='1'){ document.getElementById('pinGate').style.display='none'; safeInit(); return; }
+
+      const gate=document.getElementById('pinGate');
+      const input=document.getElementById('pinInput');
+      const btn=document.getElementById('pinOk');
+      const errEl=document.getElementById('pinErr');
+
+      function tryOpen(){
+        const ok = String(input.value||'')===String(window.GRANTOP_CFG.UI_PIN);
+        if(ok){ localStorage.setItem('grantop_pin_ok','1'); gate.style.display='none'; safeInit(); }
+        else{ errEl.textContent='PIN incorreto'; input.focus(); input.select(); }
+      }
+      btn.addEventListener('click', tryOpen);
+      input.addEventListener('keydown', e=>{ if(e.key==='Enter') tryOpen(); });
+
+      document.getElementById('btnLogout').addEventListener('click', (e)=>{ e.preventDefault(); localStorage.removeItem('grantop_pin_ok'); location.reload(); });
+      const u=new URL(location.href); if(u.searchParams.get('logout')==='1'){ localStorage.removeItem('grantop_pin_ok'); u.searchParams.delete('logout'); location.replace(u.toString()); }
+    })();
+
+    function safeInit(){
+      document.getElementById('linkPlanilha').href = SS_ID ? ('https://docs.google.com/spreadsheets/d/'+SS_ID+'/edit') : '#';
+      connectAndLoad();
+    }
+  </script>
+</body>
+</html>
